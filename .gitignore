@@ -1,0 +1,7 @@
+node_modules/
+.env
+dist/
+*.log
+
+# Configuração local do Claude Code, não faz parte do projeto
+.claude/

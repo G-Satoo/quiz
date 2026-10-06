@@ -1,0 +1,119 @@
+# ============================================================
+# Ambiente de desenvolvimento - Quiz
+#
+# Sobe:
+#   db      -> Postgres: usuários, quizzes, perguntas, histórico
+#   redis   -> estado das salas ao vivo e pub/sub entre instâncias
+#   adminer -> interface web para rodar SQL, em localhost:8082
+#   db-teste / redis-teste -> só com o profile "teste"
+#
+# Comandos:
+#   docker compose up -d      sobe tudo
+#   docker compose ps         mostra o que está rodando
+#   docker compose down       desliga (os dados continuam salvos)
+#
+# As portas são diferentes das do projeto Atalho de propósito:
+# assim os dois rodam ao mesmo tempo sem brigar.
+# ============================================================
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: quiz-db
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: quiz
+      POSTGRES_PASSWORD: quiz123
+      POSTGRES_DB: quiz
+
+    ports:
+      - "5437:5432"
+
+    volumes:
+      - dados-postgres:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quiz -d quiz"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  redis:
+    image: redis:7-alpine
+    container_name: quiz-redis
+    restart: unless-stopped
+
+    # appendonly liga o log de escrita no disco. Aqui ele importa
+    # mais do que no Atalho: o Redis vai guardar o estado das
+    # partidas em andamento, e um restart no meio de um jogo não
+    # pode zerar a pontuação de todo mundo.
+    command: ["redis-server", "--appendonly", "yes"]
+
+    ports:
+      - "6382:6379"
+
+    volumes:
+      - dados-redis:/data
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  adminer:
+    image: adminer:latest
+    container_name: quiz-adminer
+    restart: unless-stopped
+    ports:
+      - "8082:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ----- Ambiente de teste -----
+  # Sobe com:
+  #   docker compose --profile teste up -d db-teste redis-teste
+  #
+  # tmpfs no lugar do volume: nasce vazio a cada restart, e são os
+  # próprios testes que aplicam as migrações.
+  db-teste:
+    image: postgres:16-alpine
+    container_name: quiz-db-teste
+    restart: "no"
+    profiles: ["teste"]
+    environment:
+      POSTGRES_USER: quiz
+      POSTGRES_PASSWORD: quiz123
+      POSTGRES_DB: quiz_teste
+    ports:
+      - "5438:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quiz -d quiz_teste"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  redis-teste:
+    image: redis:7-alpine
+    container_name: quiz-redis-teste
+    restart: "no"
+    profiles: ["teste"]
+    ports:
+      - "6383:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  dados-postgres:
+  dados-redis:

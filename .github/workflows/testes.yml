@@ -1,0 +1,80 @@
+# ============================================================
+# Testes automáticos
+#
+# Roda a cada push e a cada pull request. O selo verde no README
+# vem daqui.
+#
+# O ponto de ter Postgres e Redis como "services": os testes de
+# integração rodam contra os bancos de verdade, igual na sua
+# máquina. Uma suíte que só passa com mock não prova que o SQL
+# está certo — e é exatamente o SQL que costuma quebrar.
+# ============================================================
+
+name: testes
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: quiz
+          POSTGRES_PASSWORD: quiz123
+          POSTGRES_DB: quiz_teste
+        ports:
+          - 5438:5432
+        # Sem o healthcheck, o job começa antes do banco aceitar
+        # conexão e os testes falham por corrida, não por bug.
+        options: >-
+          --health-cmd "pg_isready -U quiz -d quiz_teste"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6383:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          # Reaproveita o cache de pacotes entre execuções.
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      # npm ci e não npm install: instala exatamente as versões do
+      # package-lock. É o que faz o CI reproduzir o que roda aqui,
+      # em vez de pegar uma versão nova que saiu hoje de manhã.
+      - name: Instalar dependências da API
+        working-directory: api
+        run: npm ci
+
+      - name: Testes de unidade
+        working-directory: api
+        run: npm test
+
+      - name: Testes de integração
+        working-directory: api
+        # As portas batem com o que tests/ajuda/ambiente-teste.js
+        # espera por padrão, mas deixamos explícito: quem lê o
+        # workflow vê contra o que os testes rodam.
+        env:
+          DATABASE_URL_TESTE: postgres://quiz:quiz123@localhost:5438/quiz_teste
+          REDIS_URL_TESTE: redis://localhost:6383
+        run: npm run test:integracao
