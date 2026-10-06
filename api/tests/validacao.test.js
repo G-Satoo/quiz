@@ -55,6 +55,15 @@ describe("lerInteiro", () => {
     }
   });
 
+  it("aceita número de verdade, vindo de um corpo JSON", () => {
+    // Query string é sempre texto, mas corpo JSON traz o tipo de
+    // verdade. Recusar o número aqui quebrou a criação de sala
+    // antes deste teste existir.
+    assert.equal(lerInteiro(7, { padrao: null, minimo: 1, maximo: 100 }), 7);
+    assert.equal(lerInteiro(999, { padrao: null, minimo: 1, maximo: 100 }), 100);
+    assert.equal(lerInteiro(3.5, { padrao: null, minimo: 1, maximo: 100 }), null);
+  });
+
   it("ignora parâmetro repetido na query string", () => {
     // ?dias=10&dias=20 chega como array no Express. Number([]) daria
     // NaN e, sem esta guarda, NaN passaria adiante silenciosamente.

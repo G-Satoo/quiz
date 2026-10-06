@@ -50,6 +50,22 @@ export function validarSenha(senha) {
  */
 export function lerInteiro(valor, { padrao, minimo, maximo }) {
   if (valor === undefined || valor === null || valor === "") return padrao;
+
+  // Dois formatos chegam aqui, e confundir os dois custou um bug
+  // real nesta base:
+  //
+  //   query string  ->  sempre texto:     "30"
+  //   corpo JSON    ->  o tipo de verdade:  30
+  //
+  // Esta função nasceu no projeto atalho, onde só havia query
+  // string. Na primeira vez que a usamos num corpo JSON, ela
+  // recusou o número e a rota respondeu "informe o quiz" — com o
+  // quiz devidamente informado.
+  if (typeof valor === "number") {
+    if (!Number.isInteger(valor)) return padrao;
+    return Math.min(Math.max(valor, minimo), maximo);
+  }
+
   if (typeof valor !== "string") return padrao;
 
   // A regex antes do Number() não é redundante: Number("1e5") é

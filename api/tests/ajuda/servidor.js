@@ -7,22 +7,30 @@
 // funções por dentro e acreditar que o roteamento funciona.
 // ============================================================
 
-import { app } from "../../src/server.js";
+import { criarServidor } from "../../src/server.js";
 
 /**
- * app.listen(0): o sistema operacional escolhe uma porta livre.
- * Porta fixa brigaria com o `npm run dev` aberto ao lado e com
- * outro arquivo de teste rodando em paralelo.
+ * listen(0): o sistema operacional escolhe uma porta livre. Porta
+ * fixa brigaria com o `npm run dev` aberto ao lado e com outro
+ * arquivo de teste rodando em paralelo.
+ *
+ * Usa criarServidor() (e não app.listen) para o servidor de teste
+ * ter o WebSocket pendurado, igual ao de produção. Testar o HTTP
+ * num servidor e o WebSocket noutro provaria menos.
  */
 export async function subirServidor() {
   const servidor = await new Promise((resolver) => {
-    const s = app.listen(0, () => resolver(s));
+    const s = criarServidor().listen(0, () => resolver(s));
   });
 
   const { port } = servidor.address();
-  const base = `http://127.0.0.1:${port}`;
 
-  return { servidor, base, cliente: criarCliente(base) };
+  return {
+    servidor,
+    base: `http://127.0.0.1:${port}`,
+    baseWs: `ws://127.0.0.1:${port}/ws`,
+    cliente: criarCliente(`http://127.0.0.1:${port}`)
+  };
 }
 
 /**

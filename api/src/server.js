@@ -14,6 +14,8 @@
 // contra o banco de teste, sem disputar a porta 3003.
 // ============================================================
 
+import { createServer } from "node:http";
+
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
@@ -26,6 +28,8 @@ import { redis } from "./redis.js";
 import rotasUsuarios from "./rotas/usuarios.js";
 import rotasSessoes from "./rotas/sessoes.js";
 import rotasQuizzes from "./rotas/quizzes.js";
+import rotasSalas from "./rotas/salas.js";
+import { pendurarWebSocket } from "./tempo-real/servidor-ws.js";
 
 export const app = express();
 
@@ -82,6 +86,7 @@ app.get("/health", async (req, res) => {
 app.use("/api/usuarios", rotasUsuarios);
 app.use("/api/sessoes", rotasSessoes);
 app.use("/api/quizzes", rotasQuizzes);
+app.use("/api/salas", rotasSalas);
 
 app.use((req, res) => {
   res.status(404).json({ erro: "Rota não encontrada" });
@@ -98,13 +103,37 @@ app.use((erro, req, res, next) => {
   res.status(500).json({ erro: "Erro interno do servidor" });
 });
 
+/**
+ * Cria o servidor HTTP com o WebSocket pendurado nele.
+ *
+ * Antes era `app.listen()`, que cria o servidor HTTP por baixo
+ * dos panos e não devolve ele. Agora precisamos do objeto na mão:
+ * é nele que o WebSocket escuta o evento "upgrade". Os dois
+ * dividem a mesma porta porque, no fundo, são a mesma conexão.
+ *
+ * Os testes de integração chamam esta função para subir um
+ * servidor efêmero numa porta aleatória, COM WebSocket — testar o
+ * HTTP num servidor e o WebSocket noutro provaria menos.
+ */
+export function criarServidor() {
+  const servidorHttp = createServer(app);
+  const wss = pendurarWebSocket(servidorHttp);
+
+  // Fechar o servidor HTTP não fecha os WebSockets abertos — eles
+  // já deixaram de ser HTTP. Sem isto, o processo não termina.
+  servidorHttp.on("close", () => wss.close());
+
+  return servidorHttp;
+}
+
 const executadoDiretamente = process.argv[1] === fileURLToPath(import.meta.url);
 
 if (executadoDiretamente) {
   const PORTA = process.env.PORT || 3003;
 
-  app.listen(PORTA, () => {
+  criarServidor().listen(PORTA, () => {
     console.log(`\nAPI rodando em http://localhost:${PORTA}`);
+    console.log(`WebSocket em  ws://localhost:${PORTA}/ws`);
     console.log(`Saúde: http://localhost:${PORTA}/health\n`);
   });
 }
