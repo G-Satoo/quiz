@@ -154,13 +154,11 @@ export function pendurarWebSocket(servidorHttp) {
     // sua API. Como o cookie de sessão vai junto no handshake,
     // sem esta checagem um site qualquer poderia abrir uma
     // conexão autenticada como você. Conferir a origem é a defesa.
-    const origem = requisicao.headers.origin;
-    const permitida = process.env.ORIGEM_PAINEL || "http://localhost:5175";
-
-    // Sem cabeçalho Origin = não é navegador (script, teste,
-    // app nativo). Esses não carregam cookie de ninguém, então
-    // não há sessão para roubar.
-    if (origem && origem !== permitida) {
+    //
+    // Sem cabeçalho Origin = não é navegador (script, teste, app
+    // nativo). Esses não carregam cookie de ninguém, então não há
+    // sessão para roubar.
+    if (requisicao.headers.origin && !origemPermitida(requisicao)) {
       socket.destroy();
       return;
     }
@@ -262,6 +260,34 @@ export function pendurarWebSocket(servidorHttp) {
   wss.on("close", () => clearInterval(batimento));
 
   return wss;
+}
+
+/**
+ * A conexão veio de um lugar que podemos confiar?
+ *
+ * Duas origens valem:
+ *
+ *   1. A MESMA do servidor. As telas são servidas pela própria
+ *      API, então o navegador abre o WebSocket para a casa dele
+ *      mesmo — e isso vale tanto em localhost:3003 quanto em
+ *      192.168.0.10:3003, que é como o celular vai acessar na
+ *      rede local. Comparar com um endereço fixo quebraria esse
+ *      caso.
+ *
+ *   2. A do painel React (ORIGEM_PAINEL), que na fase 5 roda numa
+ *      porta separada durante o desenvolvimento.
+ */
+function origemPermitida(requisicao) {
+  const origem = requisicao.headers.origin;
+
+  // O cabeçalho Host diz por qual endereço ESTE servidor foi
+  // alcançado. Se a origem bate com ele, é a própria página.
+  const host = requisicao.headers.host;
+  if (host && (origem === `http://${host}` || origem === `https://${host}`)) {
+    return true;
+  }
+
+  return origem === (process.env.ORIGEM_PAINEL || "http://localhost:5175");
 }
 
 /** Lê o cookie de sessão do handshake. Devolve o id ou null. */

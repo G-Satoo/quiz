@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Apresentar — Quiz</title>
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+  <div class="topo">
+    <div class="marca">quiz<span>.</span></div>
+    <div id="topo-direita" class="estado"></div>
+  </div>
+
+  <div class="conteudo">
+
+    <!-- Tela 1: login -->
+    <section id="tela-login" class="escondido" style="max-width:380px;margin:40px auto">
+      <h1>Entrar</h1>
+      <p class="subtitulo">Conta de apresentador.</p>
+
+      <div class="cartao">
+        <div id="erro-login" class="erro escondido"></div>
+
+        <form id="formulario-login">
+          <label for="email">E-mail</label>
+          <input id="email" type="email" autocomplete="email" required>
+
+          <label for="senha">Senha</label>
+          <input id="senha" type="password" autocomplete="current-password" required>
+
+          <button type="submit" class="largo">Entrar</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Tela 2: escolher o quiz -->
+    <section id="tela-quizzes" class="escondido">
+      <h1>Seus quizzes</h1>
+      <p class="subtitulo">Escolha um para abrir a sala.</p>
+
+      <div id="erro-quizzes" class="erro escondido"></div>
+      <div id="lista-quizzes"></div>
+    </section>
+
+    <!-- Tela 3: a sala aberta -->
+    <section id="tela-sala" class="escondido">
+      <div class="cartao painel-codigo">
+        <div style="color:var(--texto-fraco);font-size:14px">entre em</div>
+        <div class="instrucao" style="margin:4px 0 18px">
+          <strong id="endereco"></strong>
+        </div>
+
+        <div style="color:var(--texto-fraco);font-size:14px">com o código</div>
+        <div class="codigo-grande" id="codigo"></div>
+      </div>
+
+      <h2>Quem já entrou</h2>
+      <div class="contagem"><strong id="total">0</strong> jogador(es)</div>
+      <ul class="jogadores" id="lista"></ul>
+      <div id="ninguem" class="vazio">Ninguém ainda. Projete esta tela e espere.</div>
+    </section>
+  </div>
+
+<script type="module">
+// ============================================================
+// Tela do apresentador
+//
+// Duas conversas diferentes com o mesmo servidor:
+//
+//   HTTP       login, listar quizzes, abrir a sala
+//              (acontece uma vez e tem resposta)
+//
+//   WebSocket  a lista de quem entrou
+//              (acontece o tempo todo e ninguém pediu)
+//
+// É essa a regra que separa as duas no projeto inteiro.
+// ============================================================
+
+const $ = (id) => document.getElementById(id);
+
+const telas = {
+  login: $("tela-login"),
+  quizzes: $("tela-quizzes"),
+  sala: $("tela-sala")
+};
+
+function mostrar(nome) {
+  for (const [chave, elemento] of Object.entries(telas)) {
+    elemento.classList.toggle("escondido", chave !== nome);
+  }
+}
+
+async function pedir(metodo, caminho, corpo) {
+  const resposta = await fetch(caminho, {
+    method: metodo,
+    headers: corpo ? { "Content-Type": "application/json" } : {},
+    body: corpo ? JSON.stringify(corpo) : undefined
+  });
+
+  const dados = resposta.headers.get("content-type")?.includes("json")
+    ? await resposta.json()
+    : null;
+
+  if (!resposta.ok) throw new Error(dados?.erro ?? "Erro inesperado");
+
+  return dados;
+}
+
+// ----- Abertura: já estou logado? -----
+// O cookie é httpOnly — o JavaScript não consegue lê-lo. A única
+// forma de saber se há sessão é perguntando ao servidor.
+try {
+  const { usuario } = await pedir("GET", "/api/usuarios/eu");
+  entrou(usuario);
+} catch {
+  mostrar("login");
+}
+
+function entrou(usuario) {
+  $("topo-direita").textContent = usuario.nome;
+  carregarQuizzes();
+}
+
+// ----- Login -----
+$("formulario-login").addEventListener("submit", async (evento) => {
+  evento.preventDefault();
+  $("erro-login").classList.add("escondido");
+
+  try {
+    const { usuario } = await pedir("POST", "/api/sessoes", {
+      email: $("email").value,
+      senha: $("senha").value
+    });
+    entrou(usuario);
+  } catch (erro) {
+    $("erro-login").textContent = erro.message;
+    $("erro-login").classList.remove("escondido");
+  }
+});
+
+// ----- Lista de quizzes -----
+async function carregarQuizzes() {
+  mostrar("quizzes");
+
+  try {
+    const { quizzes } = await pedir("GET", "/api/quizzes");
+    const lista = $("lista-quizzes");
+    lista.innerHTML = "";
+
+    if (quizzes.length === 0) {
+      lista.innerHTML =
+        '<div class="vazio">Nenhum quiz ainda. Rode <code>npm run semear</code> na pasta api para criar um de exemplo.</div>';
+      return;
+    }
+
+    for (const quiz of quizzes) {
+      const cartao = document.createElement("div");
+      cartao.className = "cartao";
+      cartao.style.marginBottom = "12px";
+      cartao.style.display = "flex";
+      cartao.style.alignItems = "center";
+      cartao.style.gap = "16px";
+
+      const texto = document.createElement("div");
+      texto.style.flex = "1";
+
+      const titulo = document.createElement("div");
+      titulo.style.fontWeight = "600";
+      titulo.textContent = quiz.titulo; // texto, nunca innerHTML
+
+      const detalhe = document.createElement("div");
+      detalhe.style.color = "var(--texto-fraco)";
+      detalhe.style.fontSize = "14px";
+      detalhe.textContent = `${quiz.perguntas} pergunta(s)`;
+
+      texto.append(titulo, detalhe);
+
+      const botao = document.createElement("button");
+      botao.textContent = "Abrir sala";
+      botao.disabled = quiz.perguntas === 0;
+      botao.addEventListener("click", () => abrirSala(quiz.id, botao));
+
+      cartao.append(texto, botao);
+      lista.append(cartao);
+    }
+  } catch (erro) {
+    $("erro-quizzes").textContent = erro.message;
+    $("erro-quizzes").classList.remove("escondido");
+  }
+}
+
+// ----- Abrir a sala -----
+async function abrirSala(quizId, botao) {
+  botao.disabled = true;
+
+  try {
+    const { sala } = await pedir("POST", "/api/salas", { quiz_id: quizId });
+
+    $("codigo").textContent = sala.codigo;
+
+    // location.host e não um endereço fixo: se você abrir esta
+    // página pelo IP da rede (192.168.0.10:3003), é esse endereço
+    // que precisa aparecer no telão — senão o celular de quem
+    // joga vai tentar "localhost" e chegar no próprio aparelho.
+    $("endereco").textContent = location.host;
+
+    mostrar("sala");
+    conectar(sala.codigo);
+  } catch (erro) {
+    botao.disabled = false;
+    $("erro-quizzes").textContent = erro.message;
+    $("erro-quizzes").classList.remove("escondido");
+  }
+}
+
+// ----- A conexão ao vivo -----
+function conectar(codigo) {
+  const protocolo = location.protocol === "https:" ? "wss:" : "ws:";
+  const socket = new WebSocket(`${protocolo}//${location.host}/ws`);
+
+  socket.addEventListener("open", () => {
+    // O cookie de sessão foi junto no handshake — é assim que o
+    // servidor sabe que sou eu o dono desta sala, sem eu mandar
+    // token nenhum nesta mensagem.
+    socket.send(JSON.stringify({ tipo: "apresentar", codigo }));
+  });
+
+  socket.addEventListener("message", (evento) => {
+    const mensagem = JSON.parse(evento.data);
+
+    if (mensagem.tipo === "jogadores") {
+      const lista = $("lista");
+      lista.innerHTML = "";
+
+      for (const jogador of mensagem.jogadores) {
+        const item = document.createElement("li");
+        item.textContent = jogador.apelido; // apelido é texto de desconhecido
+        lista.append(item);
+      }
+
+      $("total").textContent = mensagem.jogadores.length;
+      $("ninguem").classList.toggle("escondido", mensagem.jogadores.length > 0);
+    }
+
+    if (mensagem.tipo === "erro") {
+      alert(mensagem.mensagem);
+    }
+  });
+
+  socket.addEventListener("close", () => {
+    $("topo-direita").innerHTML =
+      '<span class="bolinha caiu"></span><span>desconectado — recarregue a página</span>';
+  });
+}
+</script>
+</body>
+</html>

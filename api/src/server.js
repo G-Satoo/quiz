@@ -21,6 +21,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import "dotenv/config";
 import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
 import { pool } from "../db/pool.js";
 import { redis } from "./redis.js";
@@ -87,6 +88,17 @@ app.use("/api/usuarios", rotasUsuarios);
 app.use("/api/sessoes", rotasSessoes);
 app.use("/api/quizzes", rotasQuizzes);
 app.use("/api/salas", rotasSalas);
+
+// As telas são servidas pela própria API, e não por um servidor
+// separado. Isso faz a conexão WebSocket ser de MESMA ORIGEM, o
+// que vale tanto em localhost quanto no IP da rede local — que é
+// como o celular de quem joga vai chegar aqui.
+//
+// Na fase 5, o painel React roda no Vite durante o
+// desenvolvimento (outra porta, por causa do recarregamento
+// automático) e é compilado para esta mesma pasta na hora do
+// deploy. Por isso o CORS continua configurado.
+app.use(express.static(join(dirname(fileURLToPath(import.meta.url)), "../../web")));
 
 app.use((req, res) => {
   res.status(404).json({ erro: "Rota não encontrada" });

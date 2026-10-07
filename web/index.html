@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Entrar na sala — Quiz</title>
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+  <div class="topo">
+    <div class="marca">quiz<span>.</span></div>
+    <a href="apresentar.html" style="font-size:13px">Sou o apresentador</a>
+  </div>
+
+  <div class="conteudo" style="max-width:420px">
+
+    <!-- Tela 1: digitar código e apelido -->
+    <section id="tela-entrada">
+      <h1>Entrar na sala</h1>
+      <p class="subtitulo">Digite o código que está no telão.</p>
+
+      <div class="cartao">
+        <div id="erro" class="erro escondido"></div>
+
+        <form id="formulario">
+          <label for="codigo">Código da sala</label>
+          <input id="codigo" class="codigo" maxlength="6" autocomplete="off"
+                 autocapitalize="characters" spellcheck="false" required>
+
+          <label for="apelido">Seu apelido</label>
+          <input id="apelido" maxlength="20" autocomplete="off" required>
+
+          <button type="submit" class="largo" id="botao">Entrar</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Tela 2: já entrou, esperando a partida começar -->
+    <section id="tela-sala" class="escondido">
+      <h1 id="titulo-sala"></h1>
+      <p class="subtitulo">
+        Você entrou como <strong id="meu-apelido"></strong>.
+      </p>
+
+      <div class="cartao">
+        <div class="estado">
+          <span class="bolinha" id="bolinha"></span>
+          <span id="estado-texto">conectando…</span>
+        </div>
+
+        <h2>Na sala agora</h2>
+        <div class="contagem"><strong id="total">0</strong> pessoa(s)</div>
+        <ul class="jogadores" id="lista"></ul>
+
+        <p class="instrucao" style="margin-top:22px">
+          Aguardando o apresentador começar a partida.
+        </p>
+      </div>
+    </section>
+  </div>
+
+<script type="module">
+// ============================================================
+// Tela do jogador
+//
+// Repare no que ESTA página NÃO faz: ela nunca pergunta ao
+// servidor se alguém entrou. Ela abre a conexão uma vez e fica
+// ouvindo. Tudo que aparece na lista chegou sem ser pedido.
+// ============================================================
+
+const $ = (id) => document.getElementById(id);
+
+const telaEntrada = $("tela-entrada");
+const telaSala = $("tela-sala");
+
+function mostrarErro(mensagem) {
+  $("erro").textContent = mensagem;
+  $("erro").classList.remove("escondido");
+  $("botao").disabled = false;
+}
+
+function definirEstado(texto, classe) {
+  $("estado-texto").textContent = texto;
+  $("bolinha").className = `bolinha ${classe}`;
+}
+
+$("formulario").addEventListener("submit", async (evento) => {
+  evento.preventDefault();
+
+  $("erro").classList.add("escondido");
+  $("botao").disabled = true;
+
+  const codigo = $("codigo").value.trim().toUpperCase();
+  const apelido = $("apelido").value.trim();
+
+  // Confere a sala por HTTP ANTES de abrir o WebSocket. Dá para
+  // pular este passo e deixar o WebSocket recusar — mas aí a
+  // pessoa veria "desconectado" em vez de "sala não encontrada",
+  // que é a informação que ela precisa para corrigir o que
+  // digitou.
+  try {
+    const resposta = await fetch(`/api/salas/${codigo}`);
+
+    if (!resposta.ok) {
+      const { erro } = await resposta.json();
+      return mostrarErro(erro ?? "Sala não encontrada");
+    }
+  } catch {
+    return mostrarErro("Não consegui falar com o servidor");
+  }
+
+  conectar(codigo, apelido);
+});
+
+function conectar(codigo, apelido) {
+  // ws:// quando a página veio por http, wss:// quando veio por
+  // https. E `location.host` em vez de um endereço fixo: assim
+  // isto funciona igual em localhost, no IP da rede local e, um
+  // dia, no domínio de verdade.
+  const protocolo = location.protocol === "https:" ? "wss:" : "ws:";
+  const socket = new WebSocket(`${protocolo}//${location.host}/ws`);
+
+  socket.addEventListener("open", () => {
+    socket.send(JSON.stringify({ tipo: "entrar", codigo, apelido }));
+  });
+
+  socket.addEventListener("message", (evento) => {
+    const mensagem = JSON.parse(evento.data);
+
+    if (mensagem.tipo === "erro") {
+      // O servidor fecha a conexão logo depois de recusar, então
+      // esta é a única chance de mostrar o motivo.
+      return mostrarErro(mensagem.mensagem);
+    }
+
+    if (mensagem.tipo === "bem-vindo") {
+      telaEntrada.classList.add("escondido");
+      telaSala.classList.remove("escondido");
+
+      $("titulo-sala").textContent = mensagem.sala.titulo;
+      $("meu-apelido").textContent = mensagem.voce.apelido;
+
+      definirEstado("conectado", "ligado");
+      return;
+    }
+
+    if (mensagem.tipo === "jogadores") {
+      const lista = $("lista");
+      lista.innerHTML = "";
+
+      for (const jogador of mensagem.jogadores) {
+        const item = document.createElement("li");
+
+        // textContent, não innerHTML: o apelido é texto que um
+        // desconhecido digitou. Com innerHTML, alguém entraria
+        // com <img onerror=...> e executaria código na tela de
+        // todo mundo da sala.
+        item.textContent = jogador.apelido;
+        lista.append(item);
+      }
+
+      $("total").textContent = mensagem.jogadores.length;
+      return;
+    }
+
+    if (mensagem.tipo === "sala-encerrada") {
+      definirEstado("o apresentador encerrou a sala", "caiu");
+    }
+  });
+
+  socket.addEventListener("close", () => {
+    // Na fase 4 isto vira reconexão automática. Por ora, é
+    // honesto dizer que caiu em vez de deixar a tela parada
+    // parecendo que só não há novidade.
+    definirEstado("desconectado", "caiu");
+  });
+
+  socket.addEventListener("error", () => {
+    definirEstado("erro de conexão", "caiu");
+  });
+}
+</script>
+</body>
+</html>
