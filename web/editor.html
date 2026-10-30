@@ -24,6 +24,41 @@
       <input id="descricao" maxlength="300" placeholder="Uma linha sobre o tema">
     </div>
 
+    <div class="cartao gerador">
+      <div class="cabecalho-gerador">
+        <h2 style="margin:0">Gerar com IA</h2>
+        <span class="selo">revise antes de salvar</span>
+      </div>
+
+      <div class="linha-gerador">
+        <div style="flex:3">
+          <label for="tema">Tema</label>
+          <input id="tema" maxlength="200" placeholder="Ex.: Naruto, Copa de 1994, SQL básico">
+        </div>
+
+        <div>
+          <label for="quantidade">Quantas</label>
+          <input id="quantidade" type="number" min="1" max="20" value="5">
+        </div>
+
+        <div>
+          <label for="dificuldade">Nível</label>
+          <select id="dificuldade">
+            <option value="facil">Fácil</option>
+            <option value="medio" selected>Médio</option>
+            <option value="dificil">Difícil</option>
+          </select>
+        </div>
+
+        <button id="botao-gerar">Gerar</button>
+      </div>
+
+      <p class="nota-gerador">
+        A IA erra. As perguntas entram aqui embaixo como rascunho — leia e corrija
+        antes de salvar.
+      </p>
+    </div>
+
     <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px">
       <h2 style="margin:0;flex:1">Perguntas</h2>
       <span id="contagem-perguntas" style="color:var(--texto-fraco);font-size:14px"></span>
@@ -288,6 +323,63 @@ $("botao-adicionar").addEventListener("click", () => {
   // Rola até a pergunta nova: numa lista longa, ela nasceria
   // fora da tela e pareceria que o botão não fez nada.
   $("perguntas").lastElementChild?.scrollIntoView({ behavior: "smooth", block: "center" });
+});
+
+// ============================================================
+// Gerar com IA
+//
+// A chamada vai para o NOSSO servidor, não para o Google: a
+// chave da IA nunca chega ao navegador. Se chegasse, qualquer
+// pessoa a leria no inspetor e gastaria a cota de quem publicou.
+// ============================================================
+$("botao-gerar").addEventListener("click", async () => {
+  limparErro();
+
+  const tema = $("tema").value.trim();
+  if (tema.length < 2) return mostrarErro("Escreva o tema do quiz");
+
+  const botao = $("botao-gerar");
+  const textoOriginal = botao.textContent;
+
+  // Geração demora uns 10 segundos. Sem este aviso, a pessoa
+  // clica de novo achando que não funcionou — e cada clique
+  // gasta cota.
+  botao.disabled = true;
+  botao.textContent = "Gerando…";
+
+  try {
+    const { perguntas: geradas, doCache } = await pedir("POST", "/api/geracao/perguntas", {
+      tema,
+      quantidade: Number($("quantidade").value) || 5,
+      dificuldade: $("dificuldade").value
+    });
+
+    // Se o rascunho só tem a pergunta vazia inicial, substitui.
+    // Se já havia trabalho, acrescenta — jogar fora o que a
+    // pessoa escreveu seria imperdoável.
+    const soTemVazia =
+      perguntas.length === 1 &&
+      perguntas[0].enunciado === "" &&
+      perguntas[0].alternativas.every((a) => a.texto === "");
+
+    perguntas = soTemVazia ? geradas : [...perguntas, ...geradas];
+
+    desenhar();
+
+    if (!$("titulo").value.trim()) $("titulo").value = tema;
+
+    $("aviso-salvo").textContent = doCache
+      ? `${geradas.length} pergunta(s) reaproveitadas de uma geração anterior. Revise e salve.`
+      : `${geradas.length} pergunta(s) geradas. Revise e salve.`;
+    $("aviso-salvo").classList.remove("escondido");
+
+    $("perguntas").scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (erro) {
+    mostrarErro(erro.message);
+  } finally {
+    botao.disabled = false;
+    botao.textContent = textoOriginal;
+  }
 });
 
 $("botao-salvar").addEventListener("click", async () => {

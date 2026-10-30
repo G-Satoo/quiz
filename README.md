@@ -5,7 +5,7 @@ entram pelo celular com um código, e as perguntas aparecem para
 todo mundo ao mesmo tempo — com cronômetro e placar atualizando em
 tempo real.
 
-`Node 22` · `React 18` · `PostgreSQL 16` · `Redis 7` · `WebSocket` · `Docker Compose` · `72 testes`
+`Node 22` · `React 18` · `PostgreSQL 16` · `Redis 7` · `WebSocket` · `Docker Compose` · `85 testes`
 
 > **Em construção.** As fases 1 a 3 estão prontas: já dá para
 > criar um quiz, abrir uma sala, as pessoas entrarem pelo celular
@@ -91,6 +91,32 @@ pode morrer sem avisar: o celular entra no elevador, o wi-fi cai,
 o notebook dorme. Para o servidor o socket continua "aberto", e o
 jogador fica eternamente na lista de presentes de uma sala que
 abandonou. Quem não responde ao ping é desconectado.
+
+**A IA é um fornecedor trocável, não uma dependência.** O resto do
+sistema conhece uma função só, `gerarPerguntas()`; quem fala com o
+Google, com um serviço compatível com a OpenAI ou com nada fica
+atrás dela, e a escolha é do `.env`. Preço, nome de modelo e
+limite gratuito mudam a cada poucos meses — quando mudar, troca
+uma linha de configuração. E os testes rodam com o provedor
+`falso`: sem chave, sem cota, sem internet, sem resposta
+diferente a cada execução. Um teste que depende de um modelo de
+linguagem não testa o seu código, testa o humor do modelo
+naquele dia.
+
+**Nada do que o modelo devolve é confiável.** A saída passa pelo
+mesmo `validarPerguntas()` de uma pergunta digitada à mão, e vai
+para o **rascunho** do editor, nunca para o banco: o modelo
+inventa fato com a mesma convicção com que acerta, e aqui isso é
+grave — marcar a alternativa errada como correta só apareceria
+com a sala inteira respondendo. Quem publica é a pessoa, depois
+de ler.
+
+**A chamada à IA acontece no servidor.** Se a tela chamasse o
+provedor direto, a chave precisaria estar no JavaScript da
+página, e qualquer pessoa a leria no inspetor. Somado a isso:
+limite de gerações por usuário (um laço de repetição esvaziaria a
+cota de madrugada) e cache por tema — o segundo pedido igual não
+gasta nada.
 
 **Nada é entregue direto a um socket: tudo passa pelo pub/sub do
 Redis.** Os sockets abertos vivem na memória do processo, então,
@@ -178,6 +204,7 @@ Tudo abaixo de `/api/quizzes` exige o cookie de sessão.
 | `PUT` | `/api/quizzes/:id/perguntas` | Substitui todas as perguntas, numa transação |
 | `POST` | `/api/salas` | Abre uma sala ao vivo para um quiz e devolve o código |
 | `GET` | `/api/salas/:codigo` | Pública: confere se a sala existe (tela de entrada) |
+| `POST` | `/api/geracao/perguntas` | Gera perguntas por IA para o rascunho do editor |
 | `GET` | `/health` | Estado da API, do banco e do Redis |
 
 ## Telas
@@ -187,7 +214,7 @@ Servidas pela própria API, em `web/`:
 | página | para quem |
 |---|---|
 | `/apresentar.html` | lista seus quizzes, abre a sala e conduz a partida |
-| `/editor.html` | cria e edita quizzes, perguntas e alternativas |
+| `/editor.html` | cria e edita quizzes, e gera perguntas por IA |
 | `/` | tela de quem joga: código, apelido e as respostas |
 
 ## WebSocket

@@ -24,6 +24,12 @@ process.env.REDIS_URL = process.env.REDIS_URL_TESTE || "redis://localhost:6383";
 process.env.DATABASE_SSL = "false";
 process.env.COOKIE_SEGURO = "false";
 
+// Os testes NUNCA chamam a IA de verdade: sem chave, sem cota,
+// sem internet, sem resposta diferente a cada execução. Um teste
+// que depende de um modelo de linguagem não testa o seu código —
+// testa o humor do modelo naquele dia.
+process.env.IA_PROVEDOR = "falso";
+
 // Trava de segurança: se por algum motivo a URL apontar para o
 // banco de desenvolvimento, é melhor o teste nem começar do que
 // truncar tabelas que têm dados de verdade.

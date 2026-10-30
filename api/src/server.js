@@ -30,6 +30,7 @@ import rotasUsuarios from "./rotas/usuarios.js";
 import rotasSessoes from "./rotas/sessoes.js";
 import rotasQuizzes from "./rotas/quizzes.js";
 import rotasSalas from "./rotas/salas.js";
+import rotasGeracao from "./rotas/geracao.js";
 import { pendurarWebSocket } from "./tempo-real/servidor-ws.js";
 
 export const app = express();
@@ -88,6 +89,7 @@ app.use("/api/usuarios", rotasUsuarios);
 app.use("/api/sessoes", rotasSessoes);
 app.use("/api/quizzes", rotasQuizzes);
 app.use("/api/salas", rotasSalas);
+app.use("/api/geracao", rotasGeracao);
 
 // As telas são servidas pela própria API, e não por um servidor
 // separado. Isso faz a conexão WebSocket ser de MESMA ORIGEM, o

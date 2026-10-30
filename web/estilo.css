@@ -360,3 +360,44 @@ button.icone {
 }
 
 .rodape-editor button:first-child { flex: 1; }
+
+/* ----- Painel de geração por IA ----- */
+
+.gerador { margin-bottom: 26px; border-color: rgba(78, 163, 255, 0.35); }
+
+.cabecalho-gerador { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.cabecalho-gerador h2 { text-transform: none; font-size: 16px; letter-spacing: 0; color: var(--texto); }
+
+/* O selo não é enfeite: a pessoa precisa saber, antes de clicar,
+   que o resultado é rascunho e não verdade. */
+.selo {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(242, 163, 60, 0.15);
+  border: 1px solid rgba(242, 163, 60, 0.4);
+  color: var(--alerta);
+}
+
+.linha-gerador { display: flex; gap: 12px; align-items: flex-end; }
+.linha-gerador input, .linha-gerador select { margin-bottom: 0; }
+.linha-gerador > div:nth-child(2) input { width: 86px; }
+
+select {
+  padding: 12px 14px;
+  background: var(--fundo);
+  border: 1px solid var(--borda);
+  border-radius: var(--raio);
+  color: var(--texto);
+  font-family: inherit;
+  font-size: 16px;
+}
+
+.nota-gerador { color: var(--texto-fraco); font-size: 13px; margin: 14px 0 0; }
+
+@media (max-width: 700px) {
+  .linha-gerador { flex-direction: column; align-items: stretch; }
+  .linha-gerador > div:nth-child(2) input { width: 100%; }
+}
