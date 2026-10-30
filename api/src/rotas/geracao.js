@@ -15,7 +15,7 @@ import { Router } from "express";
 import { redis } from "../redis.js";
 import { exigirLogin } from "../middlewares/autenticacao.js";
 import { limitar } from "../middlewares/limite.js";
-import { gerarPerguntas, ErroIA, DIFICULDADES } from "../servicos/ia.js";
+import { gerarPerguntas, conferirPergunta, ErroIA, DIFICULDADES } from "../servicos/ia.js";
 import { lerInteiro } from "../util/validacao.js";
 
 const router = Router();
@@ -118,5 +118,100 @@ router.post(
     }
   }
 );
+
+/**
+ * POST /api/geracao/conferir
+ * body: { enunciado, alternativas: [{ texto }], marcada }
+ *
+ * Confere UMA pergunta: devolve qual alternativa a IA acha que é
+ * a correta, sem saber qual está marcada, e se isso bate com o
+ * que o editor tem.
+ *
+ * O `marcada` serve só para a resposta já vir comparada — ele NÃO
+ * é enviado ao modelo, senão a conferência deixaria de ser cega.
+ */
+router.post(
+  "/conferir",
+  // Teto mais alto que o da geração: conferir é uma pergunta de
+  // cada vez, e a pessoa pode querer passar por todas de um quiz.
+  limitar({ nome: "conferir-ia", max: 120, janela: 60 * 60, chave: (req) => req.usuarioId }),
+  async (req, res, next) => {
+    try {
+      const { enunciado, alternativas, marcada } = req.body ?? {};
+
+      if (typeof enunciado !== "string" || enunciado.trim().length < 3) {
+        return res.status(400).json({ erro: "A pergunta está vazia" });
+      }
+
+      if (!Array.isArray(alternativas) || alternativas.length < 2 || alternativas.length > 6) {
+        return res.status(400).json({ erro: "A pergunta precisa de 2 a 6 alternativas" });
+      }
+
+      const textos = alternativas.map((a) => String(a?.texto ?? "").trim());
+
+      if (textos.some((t) => t === "")) {
+        return res.status(400).json({ erro: "Preencha todas as alternativas antes de conferir" });
+      }
+
+      const chave = chaveDaConferencia(enunciado, textos);
+
+      // Conferir a mesma pergunta duas vezes deve dar a mesma
+      // resposta — e não gastar cota de novo. Sem cache, clicar
+      // no botão repetidamente poderia até trazer respostas
+      // diferentes, o que confundiria mais do que ajudaria.
+      let resultado;
+
+      try {
+        const guardado = await redis.get(chave);
+        if (guardado) resultado = JSON.parse(guardado);
+      } catch {
+        // Redis fora não impede conferir.
+      }
+
+      if (!resultado) {
+        resultado = await conferirPergunta({
+          enunciado: enunciado.trim(),
+          alternativas: textos.map((texto) => ({ texto }))
+        });
+
+        try {
+          await redis.set(chave, JSON.stringify(resultado), "EX", VALIDADE_CACHE);
+        } catch {
+          // idem
+        }
+      }
+
+      const indiceMarcado = lerInteiro(marcada, {
+        padrao: null,
+        minimo: 0,
+        maximo: textos.length - 1
+      });
+
+      res.json({
+        ...resultado,
+        texto: textos[resultado.indice],
+        concorda: indiceMarcado === null ? null : indiceMarcado === resultado.indice
+      });
+    } catch (erro) {
+      if (erro instanceof ErroIA) {
+        if (erro.detalhe) console.error("Falha da IA:", erro.codigo, erro.detalhe);
+        const status = erro.codigo === "cota" ? 429 : 502;
+        return res.status(status).json({ erro: erro.message, codigo: erro.codigo });
+      }
+
+      next(erro);
+    }
+  }
+);
+
+/** A chave é a pergunta inteira: enunciado mais as alternativas. */
+function chaveDaConferencia(enunciado, textos) {
+  const resumo = createHash("sha256")
+    .update(`${enunciado.trim().toLowerCase()}|${textos.join("|").toLowerCase()}`)
+    .digest("hex")
+    .slice(0, 32);
+
+  return `conferencia:${resumo}`;
+}
 
 export default router;

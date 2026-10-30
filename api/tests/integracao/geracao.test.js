@@ -169,6 +169,91 @@ describe("cache da geração", () => {
   });
 });
 
+describe("POST /api/geracao/conferir", () => {
+  const pergunta = {
+    enunciado: "Qual é a capital do Brasil?",
+    alternativas: [
+      { texto: "Brasília" },
+      { texto: "São Paulo" },
+      { texto: "Recife" }
+    ]
+  };
+
+  it("diz qual alternativa a IA considera correta", async () => {
+    const resposta = await cliente.post("/api/geracao/conferir", {
+      ...pergunta,
+      marcada: 0
+    });
+
+    assert.equal(resposta.status, 200);
+    assert.equal(typeof resposta.dados.indice, "number");
+    assert.ok(["alta", "media", "baixa"].includes(resposta.dados.confianca));
+    assert.ok(resposta.dados.justificativa.length > 0);
+  });
+
+  it("avisa quando concorda com a marcação", async () => {
+    const resposta = await cliente.post("/api/geracao/conferir", {
+      ...pergunta,
+      marcada: 0 // o provedor falso sempre responde 0
+    });
+
+    assert.equal(resposta.dados.concorda, true);
+    assert.equal(resposta.dados.texto, "Brasília");
+  });
+
+  it("avisa quando DISCORDA da marcação", async () => {
+    // É o caso que justifica o botão existir: a pessoa marcou
+    // uma, a IA diria outra, e a tela mostra o aviso.
+    const resposta = await cliente.post("/api/geracao/conferir", {
+      ...pergunta,
+      marcada: 1
+    });
+
+    assert.equal(resposta.dados.concorda, false);
+    assert.equal(resposta.dados.indice, 0);
+  });
+
+  it("recusa pergunta com alternativa em branco", async () => {
+    const resposta = await cliente.post("/api/geracao/conferir", {
+      enunciado: "Pergunta qualquer?",
+      alternativas: [{ texto: "Uma" }, { texto: "   " }],
+      marcada: 0
+    });
+
+    assert.equal(resposta.status, 400);
+  });
+
+  it("recusa pergunta sem enunciado", async () => {
+    const resposta = await cliente.post("/api/geracao/conferir", {
+      enunciado: "",
+      alternativas: pergunta.alternativas,
+      marcada: 0
+    });
+
+    assert.equal(resposta.status, 400);
+  });
+
+  it("exige login", async () => {
+    cliente.esquecerCookie();
+
+    const resposta = await cliente.post("/api/geracao/conferir", { ...pergunta, marcada: 0 });
+    assert.equal(resposta.status, 401);
+  });
+
+  it("conferir a mesma pergunta duas vezes não gera de novo", async () => {
+    // Clicar no botão de novo deve dar a MESMA resposta, e de
+    // graça. Sem cache, poderiam vir vereditos diferentes para a
+    // mesma pergunta — o que confundiria mais do que ajudaria.
+    await cliente.post("/api/geracao/conferir", { ...pergunta, marcada: 0 });
+
+    const chaves = await redis.keys("conferencia:*");
+    assert.equal(chaves.length, 1);
+
+    const prazo = await redis.ttl(chaves[0]);
+    assert.ok(prazo > 0);
+  });
+});
+
 describe("limite de gerações", () => {
   it("barra quem passa do teto por hora", async () => {
     // Sem limite, um laço de repetição esvazia a cota (ou a

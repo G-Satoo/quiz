@@ -323,3 +323,184 @@ export async function gerarPerguntas({ tema, quantidade = 5, dificuldade = "medi
 
   return perguntas;
 }
+
+// ============================================================
+// Conferir uma pergunta
+//
+// A pergunta volta para o modelo SEM dizer qual alternativa foi
+// marcada como correta. Ele responde do zero, e quem compara é o
+// nosso código.
+//
+// Por que às cegas: se mandássemos "a resposta certa é a B,
+// confere?", o modelo tende a concordar — ele é treinado para
+// ser prestativo, e discordar de quem pergunta é menos provável
+// do que simplesmente responder. Perguntando limpo, a resposta é
+// independente, e a discordância vira sinal de verdade.
+//
+// O QUE ISTO É E O QUE NÃO É
+//
+// Não é garantia de correção: o modelo pode errar duas vezes com
+// a mesma convicção. É um DETECTOR DE DÚVIDA — pega os casos em
+// que ele estava inseguro, não os casos em que estava errado e
+// confiante. Ainda assim, aponta onde olhar numa lista de 10.
+// ============================================================
+
+const ESQUEMA_CONFERENCIA = {
+  type: "OBJECT",
+  properties: {
+    indice: { type: "INTEGER" },
+    confianca: { type: "STRING", enum: ["alta", "media", "baixa"] },
+    justificativa: { type: "STRING" }
+  },
+  required: ["indice", "confianca", "justificativa"]
+};
+
+function montarPedidoConferencia({ enunciado, alternativas }) {
+  const lista = alternativas.map((a, i) => `${i}: ${a.texto}`).join("\n");
+
+  return `Responda a pergunta de múltipla escolha abaixo.
+
+Pergunta: ${enunciado}
+
+Alternativas (com o índice de cada uma):
+${lista}
+
+Devolva:
+- "indice": o número da alternativa correta
+- "confianca": "alta" se você tem certeza do fato, "media" se acha
+  que é isso mas não garante, "baixa" se está chutando
+- "justificativa": uma frase curta explicando por quê
+
+Seja honesto na confiança. "baixa" é uma resposta aceitável e útil;
+inventar certeza não é.`;
+}
+
+async function conferirComFalso({ alternativas }) {
+  // Devolve sempre a primeira — o provedor falso gera as
+  // perguntas com a correta na posição 0, então o teste do
+  // caminho feliz concorda, e o de discordância é montado
+  // marcando outra.
+  return {
+    indice: 0,
+    confianca: "alta",
+    justificativa: `Resposta de exemplo (provedor falso, ${alternativas.length} alternativas).`
+  };
+}
+
+async function conferirComGemini(pergunta) {
+  const chave = process.env.IA_CHAVE;
+  const modelo = process.env.IA_MODELO || "gemini-3.6-flash";
+
+  if (!chave) throw new ErroIA("sem-chave", "A chave da IA não está configurada no .env");
+
+  const resposta = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`,
+    {
+      method: "POST",
+      headers: { "x-goog-api-key": chave, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: montarPedidoConferencia(pergunta) }] }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: ESQUEMA_CONFERENCIA
+        }
+      })
+    }
+  );
+
+  if (!resposta.ok) {
+    if (resposta.status === 429) {
+      throw new ErroIA("cota", "O limite gratuito da IA foi atingido. Tente de novo mais tarde.");
+    }
+
+    const falha = new ErroIA(
+      "provedor",
+      resposta.status >= 500
+        ? "O serviço de IA está congestionado. Tente de novo em instantes."
+        : `O provedor de IA recusou (HTTP ${resposta.status})`
+    );
+    falha.status = resposta.status;
+    throw falha;
+  }
+
+  const dados = await resposta.json();
+  const texto = dados?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+  if (!texto) throw new ErroIA("sem-resposta", "A IA não respondeu à conferência");
+
+  return JSON.parse(texto);
+}
+
+async function conferirComOpenAiCompativel(pergunta) {
+  const base = process.env.IA_URL_BASE;
+  if (!base) throw new ErroIA("sem-chave", "IA_URL_BASE não está configurada no .env");
+
+  const cabecalhos = { "Content-Type": "application/json" };
+  if (process.env.IA_CHAVE) cabecalhos.Authorization = `Bearer ${process.env.IA_CHAVE}`;
+
+  const resposta = await fetch(`${base}/chat/completions`, {
+    method: "POST",
+    headers: cabecalhos,
+    body: JSON.stringify({
+      model: process.env.IA_MODELO,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content:
+            'Responda apenas com JSON: {"indice": 0, "confianca": "alta|media|baixa", "justificativa": "..."}'
+        },
+        { role: "user", content: montarPedidoConferencia(pergunta) }
+      ]
+    })
+  });
+
+  if (!resposta.ok) throw new ErroIA("provedor", `O provedor de IA recusou (HTTP ${resposta.status})`);
+
+  const dados = await resposta.json();
+  return JSON.parse(dados?.choices?.[0]?.message?.content ?? "{}");
+}
+
+const CONFERENCIAS = {
+  falso: conferirComFalso,
+  gemini: conferirComGemini,
+  "openai-compativel": conferirComOpenAiCompativel
+};
+
+/**
+ * Pergunta ao modelo qual alternativa é a correta, sem contar o
+ * que está marcado. Devolve { indice, confianca, justificativa }.
+ */
+export async function conferirPergunta({ enunciado, alternativas }) {
+  const provedor = process.env.IA_PROVEDOR || "falso";
+  const implementacao = CONFERENCIAS[provedor];
+
+  if (!implementacao) throw new ErroIA("config", `Provedor de IA desconhecido: "${provedor}"`);
+
+  let bruto;
+
+  try {
+    bruto = await implementacao({ enunciado, alternativas });
+  } catch (erro) {
+    if (erro instanceof ErroIA) throw erro;
+    throw new ErroIA("falha", "Não consegui conferir agora. Tente de novo.", erro.message);
+  }
+
+  const indice = Number(bruto?.indice);
+
+  // Índice fora da lista é resposta inútil — e aconteceria em
+  // silêncio se a tela confiasse no número cru.
+  if (!Number.isInteger(indice) || indice < 0 || indice >= alternativas.length) {
+    throw new ErroIA("invalida", "A IA respondeu de forma inesperada. Tente de novo.");
+  }
+
+  const confianca = ["alta", "media", "baixa"].includes(bruto?.confianca)
+    ? bruto.confianca
+    : "media";
+
+  return {
+    indice,
+    confianca,
+    justificativa: String(bruto?.justificativa ?? "").trim().slice(0, 400)
+  };
+}

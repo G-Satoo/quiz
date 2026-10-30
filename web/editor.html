@@ -220,6 +220,15 @@ function desenharPergunta(pergunta, indice) {
 
   tempo.append(rotuloTempo, inputTempo);
 
+  // "Conferir": manda a pergunta de volta para a IA sem dizer
+  // qual alternativa está marcada, e compara. Fica por pergunta,
+  // não automático em todas: você gasta cota só onde desconfiou.
+  const conferir = document.createElement("button");
+  conferir.className = "discreto conferir";
+  conferir.textContent = "Conferir";
+  conferir.title = "Perguntar à IA qual é a correta, sem mostrar a sua marcação";
+  conferir.addEventListener("click", () => conferirPergunta(pergunta, cartao, conferir));
+
   const subir = botaoIcone("↑", indice === 0, () => mover(indice, -1));
   const descer = botaoIcone("↓", indice === perguntas.length - 1, () => mover(indice, 1));
   const remover = botaoIcone("✕", perguntas.length === 1, () => {
@@ -227,7 +236,7 @@ function desenharPergunta(pergunta, indice) {
     desenhar();
   });
 
-  cabecalho.append(numero, tempo, subir, descer, remover);
+  cabecalho.append(numero, tempo, conferir, subir, descer, remover);
 
   // ----- Enunciado -----
   const enunciado = document.createElement("input");
@@ -244,7 +253,12 @@ function desenharPergunta(pergunta, indice) {
 
   pergunta.alternativas.forEach((alternativa, posicao) => {
     const linha = document.createElement("div");
-    linha.className = "linha-alternativa";
+
+    // Cor por estado: verde na correta, apagado nas erradas.
+    // Isto é a tela de QUEM ESCREVE — na tela de quem joga, a
+    // correta nunca é revelada antes da hora (o servidor nem
+    // manda esse campo).
+    linha.className = "linha-alternativa " + (alternativa.correta ? "certa" : "errada");
 
     // Um rádio por pergunta (mesmo `name`): o navegador já
     // garante que só uma fique marcada, que é a mesma regra que o
@@ -256,6 +270,14 @@ function desenharPergunta(pergunta, indice) {
     marcador.title = "Marcar como a resposta certa";
     marcador.addEventListener("change", () => {
       pergunta.alternativas.forEach((a, i) => (a.correta = i === posicao));
+
+      // Repinta só as linhas desta pergunta, sem redesenhar o
+      // cartão: um redesenho tiraria o foco do campo e faria o
+      // cursor saltar enquanto a pessoa ainda está digitando.
+      [...lista.children].forEach((outra, i) => {
+        outra.classList.toggle("certa", i === posicao);
+        outra.classList.toggle("errada", i !== posicao);
+      });
     });
 
     const letra = document.createElement("span");
@@ -297,7 +319,72 @@ function desenharPergunta(pergunta, indice) {
   });
 
   cartao.append(cabecalho, enunciado, lista, adicionarAlternativa);
+
+  // Se esta pergunta já foi conferida, redesenha o veredito — o
+  // desenhar() recria os cartões a cada mudança, e sem isto o
+  // resultado sumiria ao adicionar outra pergunta.
+  if (pergunta.conferencia) pintarConferencia(cartao, pergunta.conferencia);
+
   return cartao;
+}
+
+/**
+ * Pede a conferência de uma pergunta e mostra o veredito.
+ */
+async function conferirPergunta(pergunta, cartao, botao) {
+  limparErro();
+
+  const marcada = pergunta.alternativas.findIndex((a) => a.correta);
+
+  const textoOriginal = botao.textContent;
+  botao.disabled = true;
+  botao.textContent = "…";
+
+  try {
+    const resultado = await pedir("POST", "/api/geracao/conferir", {
+      enunciado: pergunta.enunciado,
+      alternativas: pergunta.alternativas.map((a) => ({ texto: a.texto })),
+      marcada
+    });
+
+    // Guarda no rascunho, não só na tela: desenhar() recria tudo.
+    pergunta.conferencia = resultado;
+    pintarConferencia(cartao, resultado);
+  } catch (erro) {
+    mostrarErro(erro.message);
+  } finally {
+    botao.disabled = false;
+    botao.textContent = textoOriginal;
+  }
+}
+
+function pintarConferencia(cartao, resultado) {
+  cartao.querySelector(".veredito-conferencia")?.remove();
+
+  const caixa = document.createElement("div");
+  caixa.className = "veredito-conferencia " + (resultado.concorda ? "concorda" : "discorda");
+
+  const titulo = document.createElement("div");
+  titulo.className = "titulo-veredito";
+
+  if (resultado.concorda) {
+    titulo.textContent = `✓ A IA concorda com a sua marcação (confiança ${resultado.confianca})`;
+  } else {
+    titulo.textContent = `⚠ A IA diria "${resultado.texto}" (confiança ${resultado.confianca})`;
+  }
+
+  const porque = document.createElement("div");
+  porque.className = "justificativa";
+  porque.textContent = resultado.justificativa;
+
+  const aviso = document.createElement("div");
+  aviso.className = "ressalva";
+  aviso.textContent =
+    "Isto é um detector de dúvida, não uma garantia: a IA pode errar duas vezes. " +
+    "Quem decide é você.";
+
+  caixa.append(titulo, porque, aviso);
+  cartao.append(caixa);
 }
 
 function botaoIcone(simbolo, desabilitado, aoClicar) {
@@ -393,6 +480,8 @@ $("botao-salvar").addEventListener("click", async () => {
 
     // Limpa o rascunho antes de enviar: espaço sobrando em volta
     // do texto é erro de digitação, não conteúdo.
+    // Sem o campo `conferencia`: ele é rascunho da tela, não
+    // parte do quiz. Mandar junto só faria o servidor recusar.
     const paraEnviar = perguntas.map((p) => ({
       enunciado: p.enunciado.trim(),
       segundos: p.segundos,
