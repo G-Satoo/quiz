@@ -9,56 +9,97 @@
 <body>
   <div class="topo">
     <div class="marca">quiz<span>.</span></div>
-    <div id="topo-direita" class="estado"></div>
+    <div id="estado" class="estado"></div>
   </div>
 
   <div class="conteudo">
 
-    <!-- Tela 1: login -->
+    <!-- 1. Login -->
     <section id="tela-login" class="escondido" style="max-width:380px;margin:40px auto">
       <h1>Entrar</h1>
       <p class="subtitulo">Conta de apresentador.</p>
 
       <div class="cartao">
         <div id="erro-login" class="erro escondido"></div>
-
         <form id="formulario-login">
           <label for="email">E-mail</label>
           <input id="email" type="email" autocomplete="email" required>
-
           <label for="senha">Senha</label>
           <input id="senha" type="password" autocomplete="current-password" required>
-
           <button type="submit" class="largo">Entrar</button>
         </form>
       </div>
     </section>
 
-    <!-- Tela 2: escolher o quiz -->
+    <!-- 2. Escolher o quiz -->
     <section id="tela-quizzes" class="escondido">
       <h1>Seus quizzes</h1>
       <p class="subtitulo">Escolha um para abrir a sala.</p>
-
       <div id="erro-quizzes" class="erro escondido"></div>
       <div id="lista-quizzes"></div>
     </section>
 
-    <!-- Tela 3: a sala aberta -->
-    <section id="tela-sala" class="escondido">
+    <!-- 3. Sala de espera -->
+    <section id="tela-espera" class="escondido">
       <div class="cartao painel-codigo">
         <div style="color:var(--texto-fraco);font-size:14px">entre em</div>
-        <div class="instrucao" style="margin:4px 0 18px">
-          <strong id="endereco"></strong>
-        </div>
-
+        <div class="instrucao" style="margin:4px 0 18px"><strong id="endereco"></strong></div>
         <div style="color:var(--texto-fraco);font-size:14px">com o código</div>
         <div class="codigo-grande" id="codigo"></div>
       </div>
 
-      <h2>Quem já entrou</h2>
+      <div style="display:flex;align-items:center;gap:16px;margin:24px 0 10px">
+        <h2 style="margin:0;flex:1">Quem já entrou</h2>
+        <button id="botao-comecar" disabled>Começar partida</button>
+      </div>
+
       <div class="contagem"><strong id="total">0</strong> jogador(es)</div>
       <ul class="jogadores" id="lista"></ul>
       <div id="ninguem" class="vazio">Ninguém ainda. Projete esta tela e espere.</div>
+    </section>
+
+    <!-- 4. Pergunta no ar -->
+    <section id="tela-pergunta" class="escondido">
+      <div class="barra-pergunta">
+        <span id="posicao"></span>
+        <span class="cronometro" id="cronometro">--</span>
+      </div>
+
+      <div class="cartao">
+        <div class="enunciado" id="enunciado"></div>
+        <ul class="alternativas" id="alternativas"></ul>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:16px;margin-top:20px">
+        <div class="contagem" style="flex:1;margin:0">
+          <strong id="responderam">0</strong> de <span id="total-jogadores">0</span> já responderam
+        </div>
+        <button id="botao-encerrar" class="discreto">Encerrar agora</button>
+      </div>
+    </section>
+
+    <!-- 5. Resultado da pergunta -->
+    <section id="tela-resultado" class="escondido">
+      <h1 id="titulo-resultado">Resultado</h1>
+
+      <div class="cartao">
+        <ul class="alternativas" id="distribuicao"></ul>
+      </div>
+
+      <h2>Placar</h2>
+      <ol class="placar" id="placar"></ol>
+
+      <button id="botao-proxima" style="margin-top:20px">Próxima pergunta</button>
+    </section>
+
+    <!-- 6. Fim -->
+    <section id="tela-fim" class="escondido">
+      <h1>Fim da partida</h1>
+      <p class="subtitulo">Placar final.</p>
+      <ol class="placar" id="placar-final"></ol>
+      <button class="discreto" style="margin-top:24px" onclick="location.reload()">
+        Voltar ao início
+      </button>
     </section>
   </div>
 
@@ -66,30 +107,29 @@
 // ============================================================
 // Tela do apresentador
 //
-// Duas conversas diferentes com o mesmo servidor:
+// Duas conversas com o mesmo servidor:
 //
 //   HTTP       login, listar quizzes, abrir a sala
 //              (acontece uma vez e tem resposta)
 //
-//   WebSocket  a lista de quem entrou
+//   WebSocket  jogadores entrando, perguntas, respostas, placar
 //              (acontece o tempo todo e ninguém pediu)
-//
-// É essa a regra que separa as duas no projeto inteiro.
 // ============================================================
+
+import { criarConexao, pintarEstado } from "./conexao.js";
 
 const $ = (id) => document.getElementById(id);
 
-const telas = {
-  login: $("tela-login"),
-  quizzes: $("tela-quizzes"),
-  sala: $("tela-sala")
+const telas = ["login", "quizzes", "espera", "pergunta", "resultado", "fim"];
+const mostrar = (nome) => {
+  for (const tela of telas) {
+    $(`tela-${tela}`).classList.toggle("escondido", tela !== nome);
+  }
 };
 
-function mostrar(nome) {
-  for (const [chave, elemento] of Object.entries(telas)) {
-    elemento.classList.toggle("escondido", chave !== nome);
-  }
-}
+let conexao = null;
+let codigoSala = null;
+let cronometro = null;
 
 async function pedir(metodo, caminho, corpo) {
   const resposta = await fetch(caminho, {
@@ -103,43 +143,35 @@ async function pedir(metodo, caminho, corpo) {
     : null;
 
   if (!resposta.ok) throw new Error(dados?.erro ?? "Erro inesperado");
-
   return dados;
 }
 
 // ----- Abertura: já estou logado? -----
-// O cookie é httpOnly — o JavaScript não consegue lê-lo. A única
+// O cookie é httpOnly, o JavaScript não consegue lê-lo. A única
 // forma de saber se há sessão é perguntando ao servidor.
 try {
-  const { usuario } = await pedir("GET", "/api/usuarios/eu");
-  entrou(usuario);
+  await pedir("GET", "/api/usuarios/eu");
+  carregarQuizzes();
 } catch {
   mostrar("login");
 }
 
-function entrou(usuario) {
-  $("topo-direita").textContent = usuario.nome;
-  carregarQuizzes();
-}
-
-// ----- Login -----
 $("formulario-login").addEventListener("submit", async (evento) => {
   evento.preventDefault();
   $("erro-login").classList.add("escondido");
 
   try {
-    const { usuario } = await pedir("POST", "/api/sessoes", {
+    await pedir("POST", "/api/sessoes", {
       email: $("email").value,
       senha: $("senha").value
     });
-    entrou(usuario);
+    carregarQuizzes();
   } catch (erro) {
     $("erro-login").textContent = erro.message;
     $("erro-login").classList.remove("escondido");
   }
 });
 
-// ----- Lista de quizzes -----
 async function carregarQuizzes() {
   mostrar("quizzes");
 
@@ -150,17 +182,13 @@ async function carregarQuizzes() {
 
     if (quizzes.length === 0) {
       lista.innerHTML =
-        '<div class="vazio">Nenhum quiz ainda. Rode <code>npm run semear</code> na pasta api para criar um de exemplo.</div>';
+        '<div class="vazio">Nenhum quiz ainda. Rode <code>npm run semear</code> na pasta api.</div>';
       return;
     }
 
     for (const quiz of quizzes) {
       const cartao = document.createElement("div");
-      cartao.className = "cartao";
-      cartao.style.marginBottom = "12px";
-      cartao.style.display = "flex";
-      cartao.style.alignItems = "center";
-      cartao.style.gap = "16px";
+      cartao.className = "cartao linha";
 
       const texto = document.createElement("div");
       texto.style.flex = "1";
@@ -190,23 +218,23 @@ async function carregarQuizzes() {
   }
 }
 
-// ----- Abrir a sala -----
 async function abrirSala(quizId, botao) {
   botao.disabled = true;
 
   try {
     const { sala } = await pedir("POST", "/api/salas", { quiz_id: quizId });
 
+    codigoSala = sala.codigo;
     $("codigo").textContent = sala.codigo;
 
-    // location.host e não um endereço fixo: se você abrir esta
-    // página pelo IP da rede (192.168.0.10:3003), é esse endereço
-    // que precisa aparecer no telão — senão o celular de quem
-    // joga vai tentar "localhost" e chegar no próprio aparelho.
+    // location.host e não endereço fixo: se você abrir esta
+    // página pelo IP da rede, é esse endereço que precisa
+    // aparecer no telão — senão o celular tenta "localhost" e
+    // chega no próprio aparelho.
     $("endereco").textContent = location.host;
 
-    mostrar("sala");
-    conectar(sala.codigo);
+    mostrar("espera");
+    abrirConexao();
   } catch (erro) {
     botao.disabled = false;
     $("erro-quizzes").textContent = erro.message;
@@ -214,45 +242,174 @@ async function abrirSala(quizId, botao) {
   }
 }
 
-// ----- A conexão ao vivo -----
-function conectar(codigo) {
-  const protocolo = location.protocol === "https:" ? "wss:" : "ws:";
-  const socket = new WebSocket(`${protocolo}//${location.host}/ws`);
-
-  socket.addEventListener("open", () => {
-    // O cookie de sessão foi junto no handshake — é assim que o
-    // servidor sabe que sou eu o dono desta sala, sem eu mandar
-    // token nenhum nesta mensagem.
-    socket.send(JSON.stringify({ tipo: "apresentar", codigo }));
-  });
-
-  socket.addEventListener("message", (evento) => {
-    const mensagem = JSON.parse(evento.data);
-
-    if (mensagem.tipo === "jogadores") {
-      const lista = $("lista");
-      lista.innerHTML = "";
-
-      for (const jogador of mensagem.jogadores) {
-        const item = document.createElement("li");
-        item.textContent = jogador.apelido; // apelido é texto de desconhecido
-        lista.append(item);
-      }
-
-      $("total").textContent = mensagem.jogadores.length;
-      $("ninguem").classList.toggle("escondido", mensagem.jogadores.length > 0);
-    }
-
-    if (mensagem.tipo === "erro") {
-      alert(mensagem.mensagem);
-    }
-  });
-
-  socket.addEventListener("close", () => {
-    $("topo-direita").innerHTML =
-      '<span class="bolinha caiu"></span><span>desconectado — recarregue a página</span>';
+function abrirConexao() {
+  conexao = criarConexao({
+    // Roda a cada conexão, inclusive nas reconexões: é o que faz
+    // o apresentador reassumir a sala sozinho depois de uma
+    // queda, sem precisar recarregar a página.
+    aoAbrir: () => conexao.enviar({ tipo: "apresentar", codigo: codigoSala }),
+    aoReceber: tratar,
+    aoMudarEstado: (estado) => pintarEstado($("estado"), estado)
   });
 }
+
+// ----- As mensagens do servidor -----
+function tratar(mensagem) {
+  if (mensagem.tipo === "jogadores") {
+    const lista = $("lista");
+    lista.innerHTML = "";
+
+    for (const jogador of mensagem.jogadores) {
+      const item = document.createElement("li");
+      item.textContent = jogador.apelido; // apelido é texto de desconhecido
+      if (!jogador.online) item.classList.add("offline");
+      lista.append(item);
+    }
+
+    $("total").textContent = mensagem.jogadores.length;
+    $("total-jogadores").textContent = mensagem.jogadores.length;
+    $("ninguem").classList.toggle("escondido", mensagem.jogadores.length > 0);
+    $("botao-comecar").disabled = mensagem.jogadores.length === 0;
+    return;
+  }
+
+  if (mensagem.tipo === "pergunta") return mostrarPergunta(mensagem);
+  if (mensagem.tipo === "respondeu") return ($("responderam").textContent = mensagem.quantos);
+  if (mensagem.tipo === "resultado") return mostrarResultado(mensagem);
+  if (mensagem.tipo === "fim") return mostrarFim(mensagem);
+
+  if (mensagem.tipo === "sala-encerrada") {
+    pararCronometro();
+    alert("A sala foi encerrada.");
+    location.reload();
+    return;
+  }
+
+  if (mensagem.tipo === "erro") alert(mensagem.mensagem);
+}
+
+// ----- Pergunta no ar -----
+function mostrarPergunta(mensagem) {
+  mostrar("pergunta");
+
+  $("posicao").textContent = `Pergunta ${mensagem.indice + 1} de ${mensagem.total}`;
+  $("enunciado").textContent = mensagem.enunciado;
+  $("responderam").textContent = "0";
+
+  const lista = $("alternativas");
+  lista.innerHTML = "";
+
+  for (const [posicao, alternativa] of mensagem.alternativas.entries()) {
+    const item = document.createElement("li");
+    item.dataset.id = alternativa.id;
+
+    const letra = document.createElement("span");
+    letra.className = "letra";
+    letra.textContent = "ABCDEF"[posicao];
+
+    const texto = document.createElement("span");
+    texto.textContent = alternativa.texto;
+
+    item.append(letra, texto);
+    lista.append(item);
+  }
+
+  iniciarCronometro(mensagem.segundos);
+}
+
+// O cronômetro da tela é DESENHO. Quem decide se a resposta
+// chegou a tempo é o servidor, que carimbou a hora de início e
+// mede contra ela. Se este contador mandasse, bastaria mexer no
+// relógio do computador para ganhar.
+function iniciarCronometro(segundos) {
+  pararCronometro();
+
+  let restante = segundos;
+  $("cronometro").textContent = restante;
+
+  cronometro = setInterval(() => {
+    restante -= 1;
+    $("cronometro").textContent = Math.max(0, restante);
+    if (restante <= 0) pararCronometro();
+  }, 1000);
+}
+
+function pararCronometro() {
+  if (cronometro) {
+    clearInterval(cronometro);
+    cronometro = null;
+  }
+}
+
+// ----- Resultado -----
+function mostrarResultado(mensagem) {
+  pararCronometro();
+  mostrar("resultado");
+
+  $("titulo-resultado").textContent = `Resultado da pergunta ${mensagem.indice + 1}`;
+  $("botao-proxima").textContent = mensagem.ultima ? "Ver placar final" : "Próxima pergunta";
+
+  const maximo = Math.max(1, ...mensagem.distribuicao.map((d) => d.escolhas));
+  const lista = $("distribuicao");
+  lista.innerHTML = "";
+
+  for (const [posicao, alternativa] of mensagem.distribuicao.entries()) {
+    const item = document.createElement("li");
+    item.className = alternativa.correta ? "certa" : "errada";
+
+    const letra = document.createElement("span");
+    letra.className = "letra";
+    letra.textContent = "ABCDEF"[posicao];
+
+    const texto = document.createElement("span");
+    texto.style.flex = "1";
+    texto.textContent = alternativa.texto;
+
+    const quantos = document.createElement("span");
+    quantos.className = "quantos";
+    quantos.textContent = alternativa.escolhas;
+
+    // A barra é largura proporcional, não um gráfico de verdade:
+    // a comparação entre as alternativas é tudo que interessa.
+    const barra = document.createElement("div");
+    barra.className = "barra";
+    barra.style.width = `${(alternativa.escolhas / maximo) * 100}%`;
+
+    item.append(barra, letra, texto, quantos);
+    lista.append(item);
+  }
+
+  desenharPlacar($("placar"), mensagem.placar);
+}
+
+function desenharPlacar(elemento, placar) {
+  elemento.innerHTML = "";
+
+  for (const jogador of placar) {
+    const item = document.createElement("li");
+
+    const apelido = document.createElement("span");
+    apelido.textContent = jogador.apelido;
+
+    const pontos = document.createElement("span");
+    pontos.className = "pontos";
+    pontos.textContent = jogador.pontos;
+
+    item.append(apelido, pontos);
+    elemento.append(item);
+  }
+}
+
+function mostrarFim(mensagem) {
+  pararCronometro();
+  mostrar("fim");
+  desenharPlacar($("placar-final"), mensagem.placar);
+}
+
+// ----- Botões -----
+$("botao-comecar").addEventListener("click", () => conexao.enviar({ tipo: "comecar" }));
+$("botao-proxima").addEventListener("click", () => conexao.enviar({ tipo: "proxima" }));
+$("botao-encerrar").addEventListener("click", () => conexao.enviar({ tipo: "proxima" }));
 </script>
 </body>
 </html>

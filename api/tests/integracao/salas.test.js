@@ -48,6 +48,15 @@ afterEach(async () => {
 
 after(async () => {
   servidor.close();
+
+  // Fechar o servidor derruba os WebSockets, e cada queda dispara
+  // um handler que ainda escreve no Redis (marcar offline,
+  // avisar a sala). Se a conexão com o Redis fechar antes desses
+  // handlers terminarem, eles falham com "Connection is closed"
+  // — e a suíte inteira é reprovada por um erro que aconteceu
+  // DEPOIS dos testes passarem.
+  await new Promise((resolver) => setTimeout(resolver, 300));
+
   await encerrarConexoes();
 });
 
@@ -290,7 +299,12 @@ describe("WebSocket: a lista de jogadores ao vivo", () => {
     assert.deepEqual(lista.jogadores, []);
   });
 
-  it("avisa os jogadores quando o apresentador sai", async () => {
+  it("não derruba a sala quando o apresentador cai", async () => {
+    // Antes, qualquer queda da conexão dele encerrava a sala na
+    // hora — e isso tornava o sistema frágil de um jeito difícil
+    // de diagnosticar: um restart do servidor em desenvolvimento
+    // derrubava todo mundo, ou pior, congelava a tela dele sem
+    // aviso enquanto a sala seguia viva.
     const sala = await criarSala();
 
     const host = await abrir({ cookie: sala.cookie });
@@ -303,11 +317,59 @@ describe("WebSocket: a lista de jogadores ao vivo", () => {
 
     await host.fechar();
 
-    const aviso = await jogador.esperar("sala-encerrada");
-    assert.ok(aviso);
+    // A sala continua de pé, esperando ele voltar.
+    assert.equal(await redis.exists(`sala:${sala.codigo}`), 1);
 
-    // E a sala some do Redis — não fica lixo ocupando memória.
-    assert.equal(await redis.exists(`sala:${sala.codigo}`), 0);
+    const resposta = await cliente.get(`/api/salas/${sala.codigo}`);
+    assert.equal(resposta.status, 200);
+  });
+
+  it("o apresentador reassume a sala ao reconectar", async () => {
+    const sala = await criarSala();
+
+    const host = await abrir({ cookie: sala.cookie });
+    host.enviar({ tipo: "apresentar", codigo: sala.codigo });
+    await host.esperar("bem-vindo");
+
+    const jogador = await abrir();
+    jogador.enviar({ tipo: "entrar", codigo: sala.codigo, apelido: "Ana" });
+    await jogador.esperar("bem-vindo");
+
+    await host.fechar();
+
+    // Volta — como faria o navegador reconectando sozinho.
+    const voltou = await abrir({ cookie: sala.cookie });
+    voltou.enviar({ tipo: "apresentar", codigo: sala.codigo });
+
+    const bemVindo = await voltou.esperar("bem-vindo");
+
+    // E recebe o estado atual: quem ainda está na sala.
+    assert.deepEqual(bemVindo.jogadores.map((j) => j.apelido), ["Ana"]);
+  });
+
+  it("o jogador retoma o lugar com o id anterior", async () => {
+    // Sem isto, reconectar seria recusado por "apelido em uso" —
+    // pelo próprio jogador que acabou de cair.
+    const sala = await criarSala();
+
+    const jogador = await abrir();
+    jogador.enviar({ tipo: "entrar", codigo: sala.codigo, apelido: "Ana" });
+    const primeiro = await jogador.esperar("bem-vindo");
+
+    await jogador.fechar();
+
+    const voltou = await abrir();
+    voltou.enviar({
+      tipo: "entrar",
+      codigo: sala.codigo,
+      apelido: "Ana",
+      jogadorId: primeiro.voce.id
+    });
+
+    const segundo = await voltou.esperar("bem-vindo");
+
+    assert.equal(segundo.voce.id, primeiro.voce.id);
+    assert.equal(segundo.voce.retomou, true);
   });
 });
 

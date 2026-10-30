@@ -31,13 +31,20 @@
 // Mensagens são JSON com um campo `tipo`. Do cliente:
 //
 //   { tipo: "apresentar", codigo }            o dono abre a sala
-//   { tipo: "entrar", codigo, apelido }       o jogador entra
+//   { tipo: "entrar", codigo, apelido, jogadorId? }   o jogador entra
+//   { tipo: "comecar" }                       o dono inicia a partida
+//   { tipo: "responder", alternativaId }      o jogador responde
+//   { tipo: "proxima" }                       o dono avança
 //
 // Do servidor:
 //
 //   { tipo: "bem-vindo", papel, sala, voce }  entrou com sucesso
 //   { tipo: "jogadores", jogadores: [...] }   a lista mudou
-//   { tipo: "sala-encerrada" }                o apresentador saiu
+//   { tipo: "pergunta", enunciado, ... }      uma pergunta abriu
+//   { tipo: "respondeu", quantos }            alguém respondeu (só o dono)
+//   { tipo: "resultado", distribuicao, ... }  a pergunta fechou
+//   { tipo: "fim", placar }                   acabou a partida
+//   { tipo: "sala-encerrada" }                o apresentador desistiu
 //   { tipo: "erro", codigo, mensagem }        deu errado
 // ============================================================
 
@@ -47,6 +54,7 @@ import { WebSocketServer } from "ws";
 import { lerSessao, NOME_COOKIE } from "../servicos/sessao.js";
 import { normalizarCodigo } from "../util/codigo.js";
 import * as salas from "./salas.js";
+import * as partida from "./partida.js";
 
 // ------------------------------------------------------------
 // Quem está conectado AGORA, neste processo
@@ -212,17 +220,26 @@ export function pendurarWebSocket(servidorHttp) {
       remover(socket.sala, socket);
 
       if (socket.papel === "jogador") {
-        await salas.sair(socket.sala, socket.jogadorId);
+        // Cair não é sair: durante a partida a pessoa continua na
+        // sala, só marcada como desconectada. É o que permite ela
+        // voltar com a pontuação intacta.
+        await salas.marcarOffline(socket.sala, socket.jogadorId);
         await transmitirJogadores(socket.sala);
       }
 
       if (socket.papel === "apresentador") {
-        // Por ora, o apresentador sair encerra a sala — sem ele
-        // não há quem conduza a partida. Na fase 4 isso vira uma
-        // janela de tolerância, para ele poder recarregar a
-        // página sem derrubar 40 pessoas.
-        transmitir(socket.sala, { tipo: "sala-encerrada" });
-        await salas.encerrar(socket.sala);
+        // O apresentador cair NÃO encerra a sala na hora.
+        //
+        // Antes encerrava, e isso tornava o sistema frágil de um
+        // jeito difícil de diagnosticar: qualquer piscada de rede,
+        // um restart do servidor em desenvolvimento ou o celular
+        // trocando de aba derrubava 40 pessoas — ou, pior, deixava
+        // a tela dele congelada sem aviso enquanto a sala seguia.
+        //
+        // Agora ele tem uma janela para voltar. Quem reaparece
+        // dentro dela reassume a sala e nada se perde.
+        await salas.marcarApresentadorAusente(socket.sala);
+        agendarEncerramento(socket.sala);
       }
     });
 
@@ -315,6 +332,12 @@ async function tratar(socket, mensagem) {
       return apresentar(socket, mensagem);
     case "entrar":
       return entrar(socket, mensagem);
+    case "comecar":
+      return comecar(socket);
+    case "responder":
+      return responder(socket, mensagem);
+    case "proxima":
+      return proxima(socket);
     default:
       return recusar(socket, "tipo-desconhecido", "Não entendi essa mensagem");
   }
@@ -340,16 +363,29 @@ async function apresentar(socket, { codigo: bruto }) {
   socket.papel = "apresentador";
   registrar(codigo, socket);
 
+  // Ele voltou (ou chegou pela primeira vez): cancela o
+  // encerramento que estava agendado e limpa a marca de ausência.
+  cancelarEncerramento(codigo);
+  await salas.marcarApresentadorPresente(codigo);
+
   enviar(socket, {
     tipo: "bem-vindo",
     papel: "apresentador",
     sala: { codigo, titulo: sala.titulo, fase: sala.fase },
-    jogadores: await salas.listarJogadores(codigo)
+    jogadores: await salas.listarJogadores(codigo),
+    placar: await salas.lerPlacar(codigo)
   });
 }
 
-/** Um jogador entra com código e apelido. Sem conta. */
-async function entrar(socket, { codigo: bruto, apelido }) {
+/**
+ * Um jogador entra com código e apelido. Sem conta.
+ *
+ * O `jogadorId` opcional é a retomada: quando a conexão cai e o
+ * navegador reconecta sozinho, ele manda de volta o id que
+ * recebeu antes. Sem isso, a reconexão seria recusada por
+ * "apelido em uso" — pelo próprio jogador que acabou de cair.
+ */
+async function entrar(socket, { codigo: bruto, apelido, jogadorId: anterior }) {
   if (socket.sala) return recusar(socket, "ja-entrou", "Esta conexão já está numa sala");
 
   const codigo = normalizarCodigo(bruto);
@@ -358,7 +394,16 @@ async function entrar(socket, { codigo: bruto, apelido }) {
   const erroApelido = validarApelido(apelido);
   if (erroApelido) return recusar(socket, "apelido-invalido", erroApelido);
 
-  const jogadorId = randomUUID();
+  // Reaproveita o id anterior só se ele for mesmo daquele apelido
+  // naquela sala — aceitar qualquer id que o cliente mandasse
+  // deixaria alguém assumir a pontuação de outro jogador.
+  const jaEstava = anterior
+    ? (await salas.listarJogadores(codigo)).find(
+        (j) => j.id === anterior && j.apelido.toLowerCase() === apelido.trim().toLowerCase()
+      )
+    : null;
+
+  const jogadorId = jaEstava ? anterior : randomUUID();
   const limpo = apelido.trim();
 
   const resultado = await salas.entrar(codigo, { jogadorId, apelido: limpo });
@@ -383,7 +428,7 @@ async function entrar(socket, { codigo: bruto, apelido }) {
     tipo: "bem-vindo",
     papel: "jogador",
     sala: { codigo, titulo: sala.titulo, fase: sala.fase },
-    voce: { id: jogadorId, apelido: limpo }
+    voce: { id: jogadorId, apelido: limpo, retomou: Boolean(jaEstava) }
   });
 
   // Todo mundo (inclusive quem acabou de entrar) recebe a lista
@@ -391,4 +436,223 @@ async function entrar(socket, { codigo: bruto, apelido }) {
   // garante que a tela de todos converge para o mesmo estado —
   // quem perdeu uma mensagem no meio se corrige sozinho.
   await transmitirJogadores(codigo);
+}
+
+// ============================================================
+// Tolerância para o apresentador voltar
+//
+// Quem conduz a partida pode recarregar a página, trocar de rede
+// ou sofrer um restart do servidor em desenvolvimento. Nada disso
+// deveria derrubar a sala inteira.
+// ============================================================
+
+const TOLERANCIA_APRESENTADOR_MS = 90_000;
+
+const encerramentosAgendados = new Map(); // codigo -> timeout
+
+function agendarEncerramento(codigo) {
+  cancelarEncerramento(codigo);
+
+  // unref(): este temporizador não deve segurar o processo vivo.
+  // Sem ele, a suíte de testes passa e depois fica 90 segundos
+  // pendurada esperando um encerramento que não interessa a
+  // ninguém — e no CI isso vira um job travado.
+  const agendado = setTimeout(async () => {
+      encerramentosAgendados.delete(codigo);
+
+      // Confere se ele realmente não voltou. Entre o agendamento e
+      // agora, uma reconexão pode ter acontecido — e encerrar a
+      // sala por causa de um temporizador velho seria o bug que
+      // estamos justamente consertando.
+      const sala = await salas.ler(codigo);
+      if (!sala || !sala.apresentadorAusenteDesde) return;
+
+      transmitir(codigo, { tipo: "sala-encerrada" });
+      partida.esquecerCronometro(codigo);
+      await salas.encerrar(codigo);
+  }, TOLERANCIA_APRESENTADOR_MS);
+
+  agendado.unref();
+  encerramentosAgendados.set(codigo, agendado);
+}
+
+function cancelarEncerramento(codigo) {
+  const agendado = encerramentosAgendados.get(codigo);
+  if (agendado) {
+    clearTimeout(agendado);
+    encerramentosAgendados.delete(codigo);
+  }
+}
+
+// ============================================================
+// A partida
+// ============================================================
+
+/** Acha o socket de um jogador específico dentro da sala. */
+function socketDoJogador(codigo, jogadorId) {
+  const conexoes = conexoesPorSala.get(codigo);
+  if (!conexoes) return null;
+
+  for (const socket of conexoes) {
+    if (socket.jogadorId === jogadorId) return socket;
+  }
+
+  return null;
+}
+
+/** Só o apresentador conduz. */
+function exigirApresentador(socket) {
+  if (socket.papel !== "apresentador" || !socket.sala) {
+    recusar(socket, "nao-autorizado", "Só o apresentador pode fazer isso");
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Fecha a pergunta que está no ar e conta o resultado.
+ *
+ * Cada um recebe o que lhe diz respeito: a sala inteira vê a
+ * alternativa certa, como os votos se dividiram e o placar; cada
+ * jogador recebe, só para si, se acertou e quanto ganhou.
+ */
+async function encerrarPergunta(codigo) {
+  const resultado = await partida.fecharPergunta(codigo);
+  if (!resultado) return;
+
+  // O resultado PESSOAL vai primeiro, e a ordem importa: a tela
+  // do jogador desenha o veredito ("acertou!") quando recebe o
+  // resultado da sala, e precisa já saber o que aconteceu com
+  // ELE. Na ordem inversa, a tela mostrava "você não respondeu"
+  // para quem tinha acabado de pontuar.
+  //
+  // A tela também se corrige se a mensagem chegar depois — ordem
+  // de rede não é promessa —, mas mandar na ordem certa evita o
+  // pisca-pisca.
+  for (const [jogadorId, meu] of resultado.porJogador) {
+    const socket = socketDoJogador(codigo, jogadorId);
+    if (socket) enviar(socket, { tipo: "sua-resposta", ...meu });
+  }
+
+  transmitir(codigo, {
+    tipo: "resultado",
+    indice: resultado.indice,
+    ultima: resultado.ultima,
+    alternativaCorretaId: resultado.alternativaCorretaId,
+    distribuicao: resultado.distribuicao,
+    placar: resultado.placar
+  });
+}
+
+/** O apresentador inicia a partida. */
+async function comecar(socket) {
+  if (!exigirApresentador(socket)) return;
+
+  const codigo = socket.sala;
+  const sala = await salas.ler(codigo);
+
+  if (!sala) return recusar(socket, "sala-inexistente", "Sala não encontrada");
+
+  if (sala.fase !== "aguardando") {
+    return enviar(socket, {
+      tipo: "erro",
+      codigo: "ja-comecou",
+      mensagem: "A partida já começou"
+    });
+  }
+
+  const jogadores = await salas.listarJogadores(codigo);
+  if (jogadores.length === 0) {
+    return enviar(socket, {
+      tipo: "erro",
+      codigo: "sala-vazia",
+      mensagem: "Espere alguém entrar antes de começar"
+    });
+  }
+
+  // As perguntas são copiadas para o Redis AGORA, uma vez. Daqui
+  // para a frente o Postgres sai do caminho do jogo — e editar o
+  // quiz no meio da partida deixa de afetar quem está jogando.
+  const perguntas = await partida.carregarPerguntas(sala.quizId);
+  await salas.guardarPerguntas(codigo, perguntas);
+
+  await abrirPerguntaDaSala(codigo, 0);
+}
+
+async function abrirPerguntaDaSala(codigo, indice) {
+  const aberta = await partida.abrirPergunta(codigo, indice, {
+    transmitir: (mensagem) => transmitir(codigo, mensagem),
+    aoFechar: () => encerrarPergunta(codigo).catch((erro) => console.error(erro))
+  });
+
+  if (!aberta) {
+    // Não há pergunta neste índice: a partida acabou.
+    await salas.mudarFase(codigo, "encerrada");
+    transmitir(codigo, { tipo: "fim", placar: await salas.lerPlacar(codigo) });
+  }
+}
+
+/** Um jogador responde. */
+async function responder(socket, { alternativaId }) {
+  if (socket.papel !== "jogador" || !socket.sala) {
+    return recusar(socket, "nao-autorizado", "Entre na sala primeiro");
+  }
+
+  const resultado = await partida.responder(socket.sala, socket.jogadorId, alternativaId);
+
+  if (!resultado.aceita) {
+    const mensagens = {
+      "nao-ha-pergunta-aberta": "Não há pergunta aberta agora",
+      "alternativa-invalida": "Alternativa inválida",
+      "tempo-esgotado": "O tempo acabou",
+      "ja-respondeu": "Você já respondeu esta pergunta"
+    };
+
+    // Erro de regra do jogo não derruba a conexão: a pessoa segue
+    // na partida, só não valeu aquela tentativa.
+    return enviar(socket, {
+      tipo: "erro",
+      codigo: resultado.motivo,
+      mensagem: mensagens[resultado.motivo] ?? "Resposta recusada"
+    });
+  }
+
+  // Confirmação de recebimento — e NÃO se acertou. Saber na hora
+  // permitiria avisar o colega do lado.
+  enviar(socket, { tipo: "resposta-recebida" });
+
+  const quantos = await partida.contarRespostas(socket.sala);
+  const total = (await salas.listarJogadores(socket.sala)).length;
+
+  // Só o apresentador vê o contador subindo: é o que diz a ele se
+  // pode avançar ou se ainda falta gente pensando.
+  const conexoes = conexoesPorSala.get(socket.sala);
+  if (conexoes) {
+    for (const outro of conexoes) {
+      if (outro.papel === "apresentador") {
+        enviar(outro, { tipo: "respondeu", quantos, total });
+      }
+    }
+  }
+
+  // Todo mundo já respondeu: não faz sentido esperar o cronômetro.
+  if (quantos >= total) await encerrarPergunta(socket.sala);
+}
+
+/** O apresentador avança para a próxima pergunta. */
+async function proxima(socket) {
+  if (!exigirApresentador(socket)) return;
+
+  const codigo = socket.sala;
+  const { fase, indice } = await salas.lerPerguntaAberta(codigo);
+
+  // Avançar com a pergunta ainda aberta encerra ela antes —
+  // acontece quando o apresentador vê que todo mundo já respondeu
+  // e não quer esperar o tempo acabar.
+  if (fase === "pergunta") {
+    await encerrarPergunta(codigo);
+    return;
+  }
+
+  await abrirPerguntaDaSala(codigo, indice + 1);
 }

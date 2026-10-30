@@ -32,6 +32,14 @@ export const VALIDADE_SEGUNDOS = 6 * 60 * 60;
 const chaveSala = (codigo) => `sala:${codigo}`;
 const chaveJogadores = (codigo) => `sala:${codigo}:jogadores`;
 
+// Quem está com a conexão viva AGORA. Separado da lista de
+// jogadores de propósito: cair não é sair.
+//
+// Se a queda apagasse a pessoa da sala, ela perderia a pontuação
+// ao reconectar — e, pior, reconectar seria recusado por
+// "apelido em uso" pelo próprio fantasma dela.
+const chaveOnline = (codigo) => `sala:${codigo}:online`;
+
 // Quantas pessoas cabem numa sala. Limite existe para o broadcast
 // não virar um problema: cada resposta recebida gera uma mensagem
 // para todo mundo, então o custo cresce com o quadrado do número
@@ -81,7 +89,8 @@ export async function ler(codigo) {
     apresentadorId: Number(dados.apresentador_id),
     titulo: dados.titulo,
     fase: dados.fase,
-    criadaEm: dados.criada_em
+    criadaEm: dados.criada_em,
+    apresentadorAusenteDesde: dados.apresentador_ausente_desde ?? null
   };
 }
 
@@ -117,21 +126,41 @@ export async function entrar(codigo, { jogadorId, apelido }) {
     .multi()
     .hset(chaveJogadores(codigo), jogadorId, apelido)
     .expire(chaveJogadores(codigo), VALIDADE_SEGUNDOS)
+    .hset(chaveOnline(codigo), jogadorId, "1")
+    .expire(chaveOnline(codigo), VALIDADE_SEGUNDOS)
     .exec();
 
   return { ok: true };
 }
 
+/**
+ * A conexão caiu, mas a pessoa continua na partida.
+ *
+ * Na sala de espera, quem fecha a aba some da lista — ninguém
+ * quer um saguão cheio de gente que desistiu. Durante o jogo,
+ * fica: a pontuação é dela, e o wi-fi pode voltar.
+ */
+export async function marcarOffline(codigo, jogadorId) {
+  await redis.hdel(chaveOnline(codigo), jogadorId);
+
+  const fase = await redis.hget(chaveSala(codigo), "fase");
+  if (fase === "aguardando") await redis.hdel(chaveJogadores(codigo), jogadorId);
+}
+
 export async function sair(codigo, jogadorId) {
   await redis.hdel(chaveJogadores(codigo), jogadorId);
+  await redis.hdel(chaveOnline(codigo), jogadorId);
 }
 
 /** Lista de jogadores, em ordem alfabética para a tela não dançar. */
 export async function listarJogadores(codigo) {
-  const jogadores = await redis.hgetall(chaveJogadores(codigo));
+  const [jogadores, online] = await Promise.all([
+    redis.hgetall(chaveJogadores(codigo)),
+    redis.hgetall(chaveOnline(codigo))
+  ]);
 
   return Object.entries(jogadores)
-    .map(([id, apelido]) => ({ id, apelido }))
+    .map(([id, apelido]) => ({ id, apelido, online: online[id] === "1" }))
     .sort((a, b) => a.apelido.localeCompare(b.apelido, "pt-BR"));
 }
 
@@ -141,5 +170,127 @@ export async function mudarFase(codigo, fase) {
 
 /** Apaga a sala e tudo dela. Usado quando o apresentador encerra. */
 export async function encerrar(codigo) {
-  await redis.del(chaveSala(codigo), chaveJogadores(codigo));
+  await redis.del(chaveSala(codigo), chaveJogadores(codigo), chaveOnline(codigo));
+}
+
+// ============================================================
+// Estado da partida em andamento
+//
+// Tudo aqui vive no Redis pelo mesmo motivo do resto: a partida
+// precisa sobreviver a um restart do servidor. O que NÃO
+// sobrevive é o cronômetro (um setTimeout no processo) — essa
+// limitação está anotada em partida.js.
+// ============================================================
+
+const chavePerguntas = (codigo) => `sala:${codigo}:perguntas`;
+const chaveRespostas = (codigo, indice) => `sala:${codigo}:respostas:${indice}`;
+const chavePontos = (codigo) => `sala:${codigo}:pontos`;
+
+/**
+ * Guarda as perguntas do quiz na sala.
+ *
+ * Elas são copiadas do Postgres uma vez, no começo da partida, e
+ * não lidas de novo a cada pergunta. Dois motivos: o banco sai do
+ * caminho crítico do jogo, e editar o quiz no meio de uma partida
+ * deixa de bagunçar quem já está jogando.
+ */
+export async function guardarPerguntas(codigo, perguntas) {
+  await redis
+    .multi()
+    .set(chavePerguntas(codigo), JSON.stringify(perguntas))
+    .expire(chavePerguntas(codigo), VALIDADE_SEGUNDOS)
+    .exec();
+}
+
+export async function lerPerguntas(codigo) {
+  const bruto = await redis.get(chavePerguntas(codigo));
+  return bruto ? JSON.parse(bruto) : null;
+}
+
+/** Marca qual pergunta está no ar e quando ela começou. */
+export async function abrirPergunta(codigo, indice, inicioMs) {
+  await redis.hset(chaveSala(codigo), {
+    fase: "pergunta",
+    indice: String(indice),
+    inicio_ms: String(inicioMs)
+  });
+}
+
+export async function lerPerguntaAberta(codigo) {
+  const dados = await redis.hmget(chaveSala(codigo), "fase", "indice", "inicio_ms");
+
+  return {
+    fase: dados[0],
+    indice: dados[1] === null ? null : Number(dados[1]),
+    inicioMs: dados[2] === null ? null : Number(dados[2])
+  };
+}
+
+/**
+ * Registra a resposta de um jogador.
+ *
+ * HSETNX: grava só se aquele jogador ainda não tiver respondido
+ * esta pergunta. É o que impede alguém mandar dez respostas e
+ * ficar com a melhor — a primeira é a que vale, e a decisão é
+ * atômica no Redis, não um "if" no JavaScript que duas mensagens
+ * simultâneas atravessariam.
+ */
+export async function registrarResposta(codigo, indice, jogadorId, resposta) {
+  const gravou = await redis.hsetnx(
+    chaveRespostas(codigo, indice),
+    jogadorId,
+    JSON.stringify(resposta)
+  );
+
+  await redis.expire(chaveRespostas(codigo, indice), VALIDADE_SEGUNDOS);
+
+  return gravou === 1;
+}
+
+export async function lerRespostas(codigo, indice) {
+  const bruto = await redis.hgetall(chaveRespostas(codigo, indice));
+
+  return Object.entries(bruto).map(([jogadorId, valor]) => ({
+    jogadorId,
+    ...JSON.parse(valor)
+  }));
+}
+
+/** Soma pontos ao jogador e devolve o total novo. */
+export async function somarPontos(codigo, jogadorId, pontos) {
+  const total = await redis.hincrby(chavePontos(codigo), jogadorId, pontos);
+  await redis.expire(chavePontos(codigo), VALIDADE_SEGUNDOS);
+  return total;
+}
+
+/**
+ * O placar, do maior para o menor.
+ *
+ * Junta os pontos com os apelidos: quem só tem ponto é um id, e
+ * id não serve para ninguém ler no telão.
+ */
+export async function lerPlacar(codigo) {
+  const [pontos, jogadores] = await Promise.all([
+    redis.hgetall(chavePontos(codigo)),
+    redis.hgetall(chaveJogadores(codigo))
+  ]);
+
+  return Object.entries(jogadores)
+    .map(([id, apelido]) => ({ id, apelido, pontos: Number(pontos[id] ?? 0) }))
+    .sort((a, b) => b.pontos - a.pontos || a.apelido.localeCompare(b.apelido, "pt-BR"));
+}
+
+/**
+ * Marca a sala como aguardando a volta do apresentador.
+ *
+ * Sem isso, qualquer queda da conexão dele — um restart do
+ * servidor em desenvolvimento, o wi-fi piscando, trocar de aba no
+ * celular — encerrava a sala e derrubava todo mundo junto.
+ */
+export async function marcarApresentadorAusente(codigo) {
+  await redis.hset(chaveSala(codigo), "apresentador_ausente_desde", String(Date.now()));
+}
+
+export async function marcarApresentadorPresente(codigo) {
+  await redis.hdel(chaveSala(codigo), "apresentador_ausente_desde");
 }

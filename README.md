@@ -5,11 +5,11 @@ entram pelo celular com um código, e as perguntas aparecem para
 todo mundo ao mesmo tempo — com cronômetro e placar atualizando em
 tempo real.
 
-`Node 22` · `React 18` · `PostgreSQL 16` · `Redis 7` · `WebSocket` · `Docker Compose` · `55 testes`
+`Node 22` · `React 18` · `PostgreSQL 16` · `Redis 7` · `WebSocket` · `Docker Compose` · `72 testes`
 
-> **Em construção.** As fases 1 (contas e quizzes) e 2 (sala ao
-> vivo por WebSocket) estão prontas e testadas. A partida em si é
-> a fase 3 — veja o roteiro no fim deste arquivo.
+> **Em construção.** As fases 1 a 3 estão prontas: já dá para
+> criar um quiz, abrir uma sala, as pessoas entrarem pelo celular
+> e jogarem a partida inteira, com cronômetro e placar ao vivo.
 
 ## O que é
 
@@ -92,6 +92,35 @@ o notebook dorme. Para o servidor o socket continua "aberto", e o
 jogador fica eternamente na lista de presentes de uma sala que
 abandonou. Quem não responde ao ping é desconectado.
 
+**O servidor é dono do tempo.** O cronômetro que aparece na tela
+é desenho. A hora em que a pergunta abriu fica no Redis, e é
+contra ela que cada resposta é medida. Se o relógio do cliente
+mandasse, bastaria adiantá-lo para responder sempre em primeiro.
+
+**A resposta certa não sai do servidor antes da hora.** A
+pergunta é transmitida sem dizer qual alternativa é a correta —
+mandar e "esconder na tela" entregaria o gabarito para quem
+abrisse o inspetor do navegador. É um `.map` de uma linha, e tem
+um teste só para ele.
+
+**Primeira resposta é a que vale**, garantido por `HSETNX` no
+Redis e não por um `if` no JavaScript — duas mensagens que chegam
+juntas atravessam um `if`.
+
+**Cair não é sair.** Quem perde a conexão no meio da partida
+continua na sala, marcado como desconectado, e volta com a
+pontuação intacta mandando de volta o id que recebeu. Se a queda
+apagasse a pessoa, reconectar seria recusado por "apelido em uso"
+— pelo próprio fantasma dela. Na sala de espera, ao contrário,
+quem fecha a aba some: ninguém quer um saguão cheio de gente que
+desistiu.
+
+**O apresentador cair não derruba a sala.** Ele tem 90 segundos
+para voltar. Antes a sala era encerrada na hora, e isso tornava o
+sistema frágil de um jeito difícil de diagnosticar: um restart do
+servidor em desenvolvimento congelava a tela dele sem aviso
+enquanto a sala seguia viva.
+
 **A origem do WebSocket é conferida no handshake.** O navegador
 **não** aplica a política de mesma origem a WebSocket: qualquer
 site consegue abrir uma conexão com a sua API. Como o cookie de
@@ -153,15 +182,23 @@ Mensagens são JSON com um campo `tipo`.
 | mensagem | quem manda |
 |---|---|
 | `{ tipo: "apresentar", codigo }` | o dono do quiz, identificado pelo cookie de sessão |
-| `{ tipo: "entrar", codigo, apelido }` | o jogador, sem conta |
+| `{ tipo: "entrar", codigo, apelido, jogadorId? }` | o jogador, sem conta (o id retoma o lugar numa reconexão) |
+| `{ tipo: "comecar" }` | o dono inicia a partida |
+| `{ tipo: "responder", alternativaId }` | o jogador responde |
+| `{ tipo: "proxima" }` | o dono avança |
 
 **Do servidor:**
 
 | mensagem | quando |
 |---|---|
 | `{ tipo: "bem-vindo", papel, sala, ... }` | entrou com sucesso |
-| `{ tipo: "jogadores", jogadores: [...] }` | a lista mudou |
-| `{ tipo: "sala-encerrada" }` | o apresentador saiu |
+| `{ tipo: "jogadores", jogadores: [...] }` | a lista mudou (cada um com `online`) |
+| `{ tipo: "pergunta", enunciado, alternativas, segundos }` | uma pergunta abriu |
+| `{ tipo: "respondeu", quantos, total }` | alguém respondeu (só para o apresentador) |
+| `{ tipo: "sua-resposta", acertou, ganhos }` | o resultado daquele jogador, só para ele |
+| `{ tipo: "resultado", distribuicao, placar }` | a pergunta fechou |
+| `{ tipo: "fim", placar }` | acabou a partida |
+| `{ tipo: "sala-encerrada" }` | o apresentador não voltou |
 | `{ tipo: "erro", codigo, mensagem }` | deu errado (e a conexão fecha com 1008) |
 
 ## Roteiro
@@ -170,9 +207,13 @@ Mensagens são JSON com um campo `tipo`.
 |---|---|---|
 | 1 | contas, quizzes, perguntas, testes, CI | **pronta** |
 | 2 | sala ao vivo, código de entrada, WebSocket, lista de quem entrou | **pronta** |
-| 3 | a partida: pergunta, cronômetro autoritativo, respostas, placar | a seguir |
-| 4 | queda e reconexão, host que recarrega a página, pub/sub entre instâncias | |
-| 5 | histórico, relatório pós-partida, painel completo e deploy | |
+| 3 | a partida: pergunta, cronômetro autoritativo, respostas, placar | **pronta** |
+| 4 | pub/sub entre instâncias, retomar partida após restart do servidor | a seguir |
+| 5 | histórico, relatório pós-partida, painel em React e deploy | |
+
+A reconexão de quem cai (jogador e apresentador) estava planejada
+para a fase 4, mas foi trazida para cá: sem ela o sistema parece
+quebrado na primeira vez que alguém usa de verdade.
 
 ## Estrutura
 
