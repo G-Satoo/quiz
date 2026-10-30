@@ -33,8 +33,13 @@
 
     <!-- 2. Escolher o quiz -->
     <section id="tela-quizzes" class="escondido">
-      <h1>Seus quizzes</h1>
-      <p class="subtitulo">Escolha um para abrir a sala.</p>
+      <div style="display:flex;align-items:center;gap:16px">
+        <div style="flex:1">
+          <h1>Seus quizzes</h1>
+          <p class="subtitulo">Escolha um para abrir a sala.</p>
+        </div>
+        <a href="editor.html"><button>+ Novo quiz</button></a>
+      </div>
       <div id="erro-quizzes" class="erro escondido"></div>
       <div id="lista-quizzes"></div>
     </section>
@@ -182,7 +187,7 @@ async function carregarQuizzes() {
 
     if (quizzes.length === 0) {
       lista.innerHTML =
-        '<div class="vazio">Nenhum quiz ainda. Rode <code>npm run semear</code> na pasta api.</div>';
+        '<div class="vazio">Nenhum quiz ainda. Clique em <strong>+ Novo quiz</strong> para criar o primeiro.</div>';
       return;
     }
 
@@ -204,12 +209,18 @@ async function carregarQuizzes() {
 
       texto.append(titulo, detalhe);
 
+      const editar = document.createElement("a");
+      editar.href = `editor.html?id=${quiz.id}`;
+      editar.innerHTML = '<button class="discreto">Editar</button>';
+
       const botao = document.createElement("button");
       botao.textContent = "Abrir sala";
+      // Abrir sala de um quiz sem perguntas só geraria uma partida
+      // que termina na primeira tela.
       botao.disabled = quiz.perguntas === 0;
       botao.addEventListener("click", () => abrirSala(quiz.id, botao));
 
-      cartao.append(texto, botao);
+      cartao.append(texto, editar, botao);
       lista.append(cartao);
     }
   } catch (erro) {

@@ -55,6 +55,7 @@ import { lerSessao, NOME_COOKIE } from "../servicos/sessao.js";
 import { normalizarCodigo } from "../util/codigo.js";
 import * as salas from "./salas.js";
 import * as partida from "./partida.js";
+import * as transmissao from "./transmissao.js";
 
 // ------------------------------------------------------------
 // Quem está conectado AGORA, neste processo
@@ -95,12 +96,37 @@ function enviar(socket, mensagem) {
   }
 }
 
-/** Manda a mesma mensagem para todo mundo da sala. */
+/**
+ * Manda a mesma mensagem para todo mundo da sala.
+ *
+ * Não entrega direto: publica no Redis. Todas as instâncias
+ * recebem e cada uma entrega aos sockets que ela atende — é o
+ * que faz a sala funcionar com mais de um servidor no ar.
+ * Quem publica também recebe de volta, então existe um caminho
+ * só, igual para todos.
+ */
 export function transmitir(codigo, mensagem) {
+  transmissao.publicar(codigo, mensagem);
+}
+
+/** Manda só para um jogador, esteja ele em qual instância estiver. */
+function enviarParaJogador(codigo, jogadorId, mensagem) {
+  transmissao.publicar(codigo, mensagem, jogadorId);
+}
+
+/**
+ * Entrega aos sockets DESTE processo. Chamada pela assinatura do
+ * Redis, em todas as instâncias, para cada mensagem publicada.
+ */
+function entregarLocal(codigo, mensagem, alvo) {
   const conexoes = conexoesPorSala.get(codigo);
   if (!conexoes) return;
 
-  for (const socket of conexoes) enviar(socket, mensagem);
+  for (const socket of conexoes) {
+    // Mensagem endereçada: só quem tem aquele socket entrega.
+    if (alvo && socket.jogadorId !== alvo) continue;
+    enviar(socket, mensagem);
+  }
 }
 
 async function transmitirJogadores(codigo) {
@@ -148,6 +174,12 @@ function validarApelido(apelido) {
  */
 export function pendurarWebSocket(servidorHttp) {
   const wss = new WebSocketServer({ noServer: true });
+
+  // Liga a assinatura do Redis. A partir daqui, tudo que qualquer
+  // instância publicar chega aqui e é entregue aos sockets locais.
+  transmissao.iniciar(entregarLocal).catch((erro) => {
+    console.error("Não foi possível assinar a transmissão:", erro.message);
+  });
 
   servidorHttp.on("upgrade", async (requisicao, socket, cabeca) => {
     const url = new URL(requisicao.url, "http://localhost");
@@ -274,7 +306,10 @@ export function pendurarWebSocket(servidorHttp) {
 
   // Sem isto, o intervalo segura o processo vivo para sempre e os
   // testes travam depois de passar.
-  wss.on("close", () => clearInterval(batimento));
+  wss.on("close", () => {
+    clearInterval(batimento);
+    transmissao.fechar().catch(() => {});
+  });
 
   return wss;
 }
@@ -488,18 +523,6 @@ function cancelarEncerramento(codigo) {
 // A partida
 // ============================================================
 
-/** Acha o socket de um jogador específico dentro da sala. */
-function socketDoJogador(codigo, jogadorId) {
-  const conexoes = conexoesPorSala.get(codigo);
-  if (!conexoes) return null;
-
-  for (const socket of conexoes) {
-    if (socket.jogadorId === jogadorId) return socket;
-  }
-
-  return null;
-}
-
 /** Só o apresentador conduz. */
 function exigirApresentador(socket) {
   if (socket.papel !== "apresentador" || !socket.sala) {
@@ -530,8 +553,7 @@ async function encerrarPergunta(codigo) {
   // de rede não é promessa —, mas mandar na ordem certa evita o
   // pisca-pisca.
   for (const [jogadorId, meu] of resultado.porJogador) {
-    const socket = socketDoJogador(codigo, jogadorId);
-    if (socket) enviar(socket, { tipo: "sua-resposta", ...meu });
+    enviarParaJogador(codigo, jogadorId, { tipo: "sua-resposta", ...meu });
   }
 
   transmitir(codigo, {
@@ -624,16 +646,12 @@ async function responder(socket, { alternativaId }) {
   const quantos = await partida.contarRespostas(socket.sala);
   const total = (await salas.listarJogadores(socket.sala)).length;
 
-  // Só o apresentador vê o contador subindo: é o que diz a ele se
-  // pode avançar ou se ainda falta gente pensando.
-  const conexoes = conexoesPorSala.get(socket.sala);
-  if (conexoes) {
-    for (const outro of conexoes) {
-      if (outro.papel === "apresentador") {
-        enviar(outro, { tipo: "respondeu", quantos, total });
-      }
-    }
-  }
+  // Só o apresentador usa o contador, mas a mensagem vai para a
+  // sala inteira: ela precisa atravessar as instâncias, e filtrar
+  // por papel exigiria um endereçamento que não vale a pena para
+  // uma informação que não é segredo. As telas dos jogadores
+  // simplesmente ignoram este tipo.
+  transmitir(socket.sala, { tipo: "respondeu", quantos, total });
 
   // Todo mundo já respondeu: não faz sentido esperar o cronômetro.
   if (quantos >= total) await encerrarPergunta(socket.sala);

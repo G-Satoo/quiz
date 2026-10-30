@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Editor de quiz — Quiz</title>
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+  <div class="topo">
+    <div class="marca">quiz<span>.</span></div>
+    <a href="apresentar.html" style="font-size:13px">← Meus quizzes</a>
+  </div>
+
+  <div class="conteudo">
+    <div id="erro" class="erro escondido"></div>
+    <div id="aviso-salvo" class="aviso escondido">Salvo.</div>
+
+    <div class="cartao" style="margin-bottom:26px">
+      <label for="titulo">Título do quiz</label>
+      <input id="titulo" maxlength="140" placeholder="Ex.: Conhecimentos gerais" required>
+
+      <label for="descricao">Descrição (opcional)</label>
+      <input id="descricao" maxlength="300" placeholder="Uma linha sobre o tema">
+    </div>
+
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px">
+      <h2 style="margin:0;flex:1">Perguntas</h2>
+      <span id="contagem-perguntas" style="color:var(--texto-fraco);font-size:14px"></span>
+    </div>
+
+    <div id="perguntas"></div>
+
+    <button class="discreto largo" id="botao-adicionar" style="margin-top:4px">
+      + Adicionar pergunta
+    </button>
+
+    <div class="rodape-editor">
+      <button id="botao-salvar">Salvar quiz</button>
+      <button class="discreto" id="botao-apagar">Apagar quiz</button>
+    </div>
+  </div>
+
+<script type="module">
+// ============================================================
+// Editor de quiz
+//
+// A tela inteira trabalha sobre um rascunho em memória, e só
+// manda para o servidor quando você clica em Salvar — num PUT
+// que substitui TODAS as perguntas de uma vez, dentro de uma
+// transação no banco.
+//
+// A alternativa seria salvar cada mudança na hora (uma chamada
+// por tecla digitada, por alternativa marcada). Isso traria
+// perguntas pela metade para o banco enquanto você ainda está
+// pensando, e o quiz ficaria num estado que nunca foi o que você
+// quis — só o que você tinha escrito até ali.
+// ============================================================
+
+const $ = (id) => document.getElementById(id);
+
+const LIMITE_ALTERNATIVAS = 6;
+const MINIMO_ALTERNATIVAS = 2;
+
+// O id vem da URL: editor.html?id=3 edita, sem id cria do zero.
+const parametros = new URLSearchParams(location.search);
+let quizId = parametros.get("id") ? Number(parametros.get("id")) : null;
+
+/** O rascunho. É a fonte da verdade da tela. */
+let perguntas = [];
+
+async function pedir(metodo, caminho, corpo) {
+  const resposta = await fetch(caminho, {
+    method: metodo,
+    headers: corpo ? { "Content-Type": "application/json" } : {},
+    body: corpo ? JSON.stringify(corpo) : undefined
+  });
+
+  const dados = resposta.headers.get("content-type")?.includes("json")
+    ? await resposta.json()
+    : null;
+
+  if (!resposta.ok) throw new Error(dados?.erro ?? "Erro inesperado");
+  return dados;
+}
+
+function mostrarErro(mensagem) {
+  $("erro").textContent = mensagem;
+  $("erro").classList.remove("escondido");
+  $("erro").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function limparErro() {
+  $("erro").classList.add("escondido");
+}
+
+function perguntaVazia() {
+  return {
+    enunciado: "",
+    segundos: 20,
+    alternativas: [
+      { texto: "", correta: true },
+      { texto: "", correta: false }
+    ]
+  };
+}
+
+// ----- Carregar -----
+if (quizId) {
+  try {
+    const { quiz } = await pedir("GET", `/api/quizzes/${quizId}`);
+
+    $("titulo").value = quiz.titulo;
+    $("descricao").value = quiz.descricao ?? "";
+
+    perguntas = quiz.perguntas.map((p) => ({
+      enunciado: p.enunciado,
+      segundos: p.segundos,
+      alternativas: p.alternativas.map((a) => ({ texto: a.texto, correta: a.correta }))
+    }));
+  } catch (erro) {
+    mostrarErro(erro.message);
+  }
+} else {
+  perguntas = [perguntaVazia()];
+  $("botao-apagar").classList.add("escondido");
+}
+
+desenhar();
+
+// ============================================================
+// Desenho
+//
+// Redesenha a lista inteira a cada mudança de estrutura
+// (adicionar, remover, marcar a correta). Para um editor de no
+// máximo 50 perguntas isso é instantâneo, e evita a classe de
+// bug mais chata deste tipo de tela: a numeração e os índices
+// saírem de sincronia com o que está na memória.
+//
+// O texto digitado NÃO redesenha — senão o cursor saltaria para
+// o fim a cada tecla.
+// ============================================================
+function desenhar() {
+  const container = $("perguntas");
+  container.innerHTML = "";
+
+  perguntas.forEach((pergunta, indice) => {
+    container.append(desenharPergunta(pergunta, indice));
+  });
+
+  $("contagem-perguntas").textContent =
+    `${perguntas.length} de 50 · mínimo 1`;
+
+  $("botao-adicionar").disabled = perguntas.length >= 50;
+}
+
+function desenharPergunta(pergunta, indice) {
+  const cartao = document.createElement("div");
+  cartao.className = "cartao pergunta-editor";
+
+  // ----- Cabeçalho -----
+  const cabecalho = document.createElement("div");
+  cabecalho.className = "cabecalho-pergunta";
+
+  const numero = document.createElement("span");
+  numero.className = "numero-pergunta";
+  numero.textContent = indice + 1;
+
+  const tempo = document.createElement("div");
+  tempo.className = "campo-tempo";
+
+  const rotuloTempo = document.createElement("label");
+  rotuloTempo.textContent = "segundos";
+  rotuloTempo.htmlFor = `segundos-${indice}`;
+
+  const inputTempo = document.createElement("input");
+  inputTempo.id = `segundos-${indice}`;
+  inputTempo.type = "number";
+  inputTempo.min = 5;
+  inputTempo.max = 300;
+  inputTempo.value = pergunta.segundos;
+  inputTempo.addEventListener("input", () => {
+    pergunta.segundos = Number(inputTempo.value);
+  });
+
+  tempo.append(rotuloTempo, inputTempo);
+
+  const subir = botaoIcone("↑", indice === 0, () => mover(indice, -1));
+  const descer = botaoIcone("↓", indice === perguntas.length - 1, () => mover(indice, 1));
+  const remover = botaoIcone("✕", perguntas.length === 1, () => {
+    perguntas.splice(indice, 1);
+    desenhar();
+  });
+
+  cabecalho.append(numero, tempo, subir, descer, remover);
+
+  // ----- Enunciado -----
+  const enunciado = document.createElement("input");
+  enunciado.placeholder = "Escreva a pergunta";
+  enunciado.maxLength = 500;
+  enunciado.value = pergunta.enunciado;
+  enunciado.addEventListener("input", () => {
+    pergunta.enunciado = enunciado.value;
+  });
+
+  // ----- Alternativas -----
+  const lista = document.createElement("div");
+  lista.className = "alternativas-editor";
+
+  pergunta.alternativas.forEach((alternativa, posicao) => {
+    const linha = document.createElement("div");
+    linha.className = "linha-alternativa";
+
+    // Um rádio por pergunta (mesmo `name`): o navegador já
+    // garante que só uma fique marcada, que é a mesma regra que o
+    // banco impõe com o índice único parcial.
+    const marcador = document.createElement("input");
+    marcador.type = "radio";
+    marcador.name = `correta-${indice}`;
+    marcador.checked = alternativa.correta;
+    marcador.title = "Marcar como a resposta certa";
+    marcador.addEventListener("change", () => {
+      pergunta.alternativas.forEach((a, i) => (a.correta = i === posicao));
+    });
+
+    const letra = document.createElement("span");
+    letra.className = "letra";
+    letra.textContent = "ABCDEF"[posicao];
+
+    const texto = document.createElement("input");
+    texto.placeholder = `Alternativa ${"ABCDEF"[posicao]}`;
+    texto.maxLength = 200;
+    texto.value = alternativa.texto;
+    texto.addEventListener("input", () => {
+      alternativa.texto = texto.value;
+    });
+
+    const tirar = botaoIcone("✕", pergunta.alternativas.length <= MINIMO_ALTERNATIVAS, () => {
+      pergunta.alternativas.splice(posicao, 1);
+
+      // Se a removida era a correta, a primeira assume — uma
+      // pergunta sem resposta certa não pode ser corrigida
+      // durante a partida, e o servidor recusaria o salvamento.
+      if (!pergunta.alternativas.some((a) => a.correta)) {
+        pergunta.alternativas[0].correta = true;
+      }
+
+      desenhar();
+    });
+
+    linha.append(marcador, letra, texto, tirar);
+    lista.append(linha);
+  });
+
+  const adicionarAlternativa = document.createElement("button");
+  adicionarAlternativa.className = "discreto";
+  adicionarAlternativa.textContent = "+ alternativa";
+  adicionarAlternativa.disabled = pergunta.alternativas.length >= LIMITE_ALTERNATIVAS;
+  adicionarAlternativa.addEventListener("click", () => {
+    pergunta.alternativas.push({ texto: "", correta: false });
+    desenhar();
+  });
+
+  cartao.append(cabecalho, enunciado, lista, adicionarAlternativa);
+  return cartao;
+}
+
+function botaoIcone(simbolo, desabilitado, aoClicar) {
+  const botao = document.createElement("button");
+  botao.className = "discreto icone";
+  botao.textContent = simbolo;
+  botao.disabled = desabilitado;
+  botao.addEventListener("click", aoClicar);
+  return botao;
+}
+
+function mover(indice, direcao) {
+  const destino = indice + direcao;
+  [perguntas[indice], perguntas[destino]] = [perguntas[destino], perguntas[indice]];
+  desenhar();
+}
+
+// ----- Ações -----
+$("botao-adicionar").addEventListener("click", () => {
+  perguntas.push(perguntaVazia());
+  desenhar();
+
+  // Rola até a pergunta nova: numa lista longa, ela nasceria
+  // fora da tela e pareceria que o botão não fez nada.
+  $("perguntas").lastElementChild?.scrollIntoView({ behavior: "smooth", block: "center" });
+});
+
+$("botao-salvar").addEventListener("click", async () => {
+  limparErro();
+  $("aviso-salvo").classList.add("escondido");
+  $("botao-salvar").disabled = true;
+
+  try {
+    const titulo = $("titulo").value.trim();
+    if (!titulo) throw new Error("Dê um título ao quiz");
+
+    // Limpa o rascunho antes de enviar: espaço sobrando em volta
+    // do texto é erro de digitação, não conteúdo.
+    const paraEnviar = perguntas.map((p) => ({
+      enunciado: p.enunciado.trim(),
+      segundos: p.segundos,
+      alternativas: p.alternativas.map((a) => ({ texto: a.texto.trim(), correta: a.correta }))
+    }));
+
+    if (quizId) {
+      await pedir("PATCH", `/api/quizzes/${quizId}`, {
+        titulo,
+        descricao: $("descricao").value.trim()
+      });
+    } else {
+      const { quiz } = await pedir("POST", "/api/quizzes", {
+        titulo,
+        descricao: $("descricao").value.trim()
+      });
+
+      quizId = quiz.id;
+
+      // Troca a URL sem recarregar: a partir daqui a página edita
+      // um quiz que existe, e recarregar não deve criar outro.
+      history.replaceState(null, "", `editor.html?id=${quizId}`);
+      $("botao-apagar").classList.remove("escondido");
+    }
+
+    // A validação de verdade é do servidor — ele conhece as
+    // regras e é quem não pode ser contornado. A tela só repassa
+    // a mensagem, que já vem dizendo QUAL pergunta está errada.
+    await pedir("PUT", `/api/quizzes/${quizId}/perguntas`, { perguntas: paraEnviar });
+
+    $("aviso-salvo").classList.remove("escondido");
+    setTimeout(() => $("aviso-salvo").classList.add("escondido"), 2500);
+  } catch (erro) {
+    mostrarErro(erro.message);
+  } finally {
+    $("botao-salvar").disabled = false;
+  }
+});
+
+$("botao-apagar").addEventListener("click", async () => {
+  if (!confirm("Apagar este quiz? As perguntas vão junto.")) return;
+
+  try {
+    await pedir("DELETE", `/api/quizzes/${quizId}`);
+    location.href = "apresentar.html";
+  } catch (erro) {
+    mostrarErro(erro.message);
+  }
+});
+</script>
+</body>
+</html>

@@ -306,3 +306,57 @@ input.codigo {
 
 /* Quem caiu continua na lista, apagado — cair não é sair. */
 .jogadores li.offline { opacity: 0.4; }
+
+/* ============================================================
+   Editor de quiz
+   ============================================================ */
+
+.pergunta-editor { margin-bottom: 16px; }
+
+.cabecalho-pergunta { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+
+.numero-pergunta {
+  flex: none;
+  width: 30px; height: 30px;
+  display: grid; place-items: center;
+  background: var(--destaque);
+  color: #0b1017;
+  border-radius: 7px;
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.campo-tempo { flex: 1; display: flex; align-items: center; gap: 8px; }
+.campo-tempo label { margin: 0; }
+.campo-tempo input { width: 76px; margin: 0; padding: 7px 10px; text-align: center; }
+
+button.icone {
+  padding: 7px 11px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.alternativas-editor { display: grid; gap: 8px; margin: 14px 0; }
+
+.linha-alternativa { display: flex; align-items: center; gap: 10px; }
+.linha-alternativa input[type="text"],
+.linha-alternativa input:not([type]) { flex: 1; margin: 0; }
+
+/* O rádio é a marca da resposta certa; merece ser visível. */
+.linha-alternativa input[type="radio"] {
+  width: 19px; height: 19px;
+  flex: none; margin: 0;
+  accent-color: var(--sucesso);
+  cursor: pointer;
+}
+
+.rodape-editor {
+  display: flex;
+  gap: 12px;
+  margin-top: 28px;
+  padding-top: 22px;
+  border-top: 1px solid var(--borda);
+}
+
+.rodape-editor button:first-child { flex: 1; }

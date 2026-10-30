@@ -92,6 +92,18 @@ o notebook dorme. Para o servidor o socket continua "aberto", e o
 jogador fica eternamente na lista de presentes de uma sala que
 abandonou. Quem não responde ao ping é desconectado.
 
+**Nada é entregue direto a um socket: tudo passa pelo pub/sub do
+Redis.** Os sockets abertos vivem na memória do processo, então,
+com mais de uma instância no ar, os jogadores de uma mesma sala
+se espalham entre elas — e um aviso entregue localmente nunca
+alcança quem está do outro lado. Isso aconteceu de verdade aqui,
+com dois `npm run dev` abertos em portas diferentes: o
+apresentador via zero jogadores enquanto o jogador se via na
+sala, sem nenhum erro no log. Agora quem quer falar com a sala
+publica no Redis e todas as instâncias entregam aos seus. Quem
+publica também recebe de volta — um caminho só, igual para
+todos, em vez de duas implementações do mesmo comportamento.
+
 **O servidor é dono do tempo.** O cronômetro que aparece na tela
 é desenho. A hora em que a pergunta abriu fica no Redis, e é
 contra ela que cada resposta é medida. Se o relógio do cliente
@@ -168,6 +180,16 @@ Tudo abaixo de `/api/quizzes` exige o cookie de sessão.
 | `GET` | `/api/salas/:codigo` | Pública: confere se a sala existe (tela de entrada) |
 | `GET` | `/health` | Estado da API, do banco e do Redis |
 
+## Telas
+
+Servidas pela própria API, em `web/`:
+
+| página | para quem |
+|---|---|
+| `/apresentar.html` | lista seus quizzes, abre a sala e conduz a partida |
+| `/editor.html` | cria e edita quizzes, perguntas e alternativas |
+| `/` | tela de quem joga: código, apelido e as respostas |
+
 ## WebSocket
 
 Endereço: `ws://localhost:3003/ws` — a mesma porta da API, porque
@@ -208,8 +230,8 @@ Mensagens são JSON com um campo `tipo`.
 | 1 | contas, quizzes, perguntas, testes, CI | **pronta** |
 | 2 | sala ao vivo, código de entrada, WebSocket, lista de quem entrou | **pronta** |
 | 3 | a partida: pergunta, cronômetro autoritativo, respostas, placar | **pronta** |
-| 4 | pub/sub entre instâncias, retomar partida após restart do servidor | a seguir |
-| 5 | histórico, relatório pós-partida, painel em React e deploy | |
+| 4 | pub/sub entre instâncias | **pronta** · falta retomar partida após restart do servidor |
+| 5 | histórico, relatório pós-partida, painel em React e deploy | a seguir |
 
 A reconexão de quem cai (jogador e apresentador) estava planejada
 para a fase 4, mas foi trazida para cá: sem ela o sistema parece
