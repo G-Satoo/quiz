@@ -3,111 +3,194 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Entrar na sala — Quiz</title>
+  <title>Quiz — catálogo</title>
   <link rel="stylesheet" href="estilo.css">
 </head>
 <body>
+  <!--
+    O topo carrega as DUAS portas do site, e elas não têm o mesmo
+    peso de propósito.
+
+    A porta larga é o catálogo abaixo: chegou, vê os quizzes,
+    sem pedir nada. A porta estreita é o código de sala, no
+    canto — quem tem um código recebeu de alguém, já sabe para
+    onde vai, e não precisa que o site insista nisso.
+
+    Era o contrário antes: o site abria pedindo um código, o que
+    só servia a quem já tinha um e deixava todo mundo mais sem
+    ter o que fazer.
+  -->
   <div class="topo">
-    <div class="marca">quiz<span>.</span></div>
+    <a class="marca" href="index.html">quiz<span>.</span></a>
+
+    <div class="acoes-topo">
+      <a href="jogar.html" class="botao-codigo">
+        <span class="ponto-vivo"></span> Entrar com código
+      </a>
+
+      <!-- Trocado por nome + Sair quando há sessão. -->
+      <div id="area-conta" class="area-conta"></div>
+    </div>
+
     <div id="estado" class="estado"></div>
   </div>
 
-  <div class="conteudo" style="max-width:460px">
+  <div class="conteudo">
 
-    <!-- 1. Entrar -->
-    <section id="tela-entrada">
-      <h1>Entrar na sala</h1>
-      <p class="subtitulo">Digite o código que está no telão.</p>
+    <!--
+      1. Login
+
+      Não é mais a primeira tela: só aparece quando a pessoa pede
+      algo que exige conta (criar, editar, abrir sala). E guarda
+      o que ela ia fazer, para continuar dali depois de entrar —
+      um login que faz voltar ao começo pune quem obedeceu.
+    -->
+    <section id="tela-login" class="escondido" style="max-width:380px;margin:40px auto">
+      <h1>Entrar</h1>
+      <p class="subtitulo" id="motivo-login">Conta de apresentador.</p>
 
       <div class="cartao">
-        <div id="erro" class="erro escondido"></div>
-
-        <form id="formulario">
-          <label for="codigo">Código da sala</label>
-          <input id="codigo" class="codigo" maxlength="6" autocomplete="off"
-                 autocapitalize="characters" spellcheck="false" required>
-
-          <label for="apelido">Seu apelido</label>
-          <input id="apelido" maxlength="20" autocomplete="off" required>
-
-          <button type="submit" class="largo" id="botao">Entrar</button>
+        <div id="erro-login" class="erro escondido"></div>
+        <form id="formulario-login">
+          <label for="email">E-mail</label>
+          <input id="email" type="email" autocomplete="email" required>
+          <label for="senha">Senha</label>
+          <input id="senha" type="password" autocomplete="current-password" required>
+          <button type="submit" class="largo">Entrar</button>
         </form>
       </div>
 
-      <p style="text-align:center;margin-top:20px">
-        <a href="apresentar.html" style="font-size:13px">Sou o apresentador</a>
+      <p style="text-align:center;margin-top:18px">
+        <a href="#" id="voltar-catalogo" style="font-size:13px">← Voltar ao catálogo</a>
       </p>
     </section>
 
-    <!-- 2. Esperando a partida -->
-    <section id="tela-espera" class="escondido">
-      <h1 id="titulo-sala"></h1>
-      <p class="subtitulo">Você entrou como <strong id="meu-apelido"></strong>.</p>
+    <!-- 2. Catálogo -->
+    <section id="tela-quizzes" class="escondido">
+      <div id="erro-quizzes" class="erro escondido"></div>
 
-      <div class="cartao">
-        <h2 style="margin-top:0">Na sala agora</h2>
-        <div class="contagem"><strong id="total">0</strong> pessoa(s)</div>
-        <ul class="jogadores" id="lista"></ul>
-        <p class="instrucao" style="margin-top:22px">
-          Aguardando o apresentador começar.
-        </p>
+      <!-- Vitrine -->
+      <div class="destaque escondido" id="destaque"></div>
+
+      <!-- Fileiras por critério -->
+      <div id="fileiras"></div>
+
+      <!-- Tudo, com filtro por categoria -->
+      <div class="topo-catalogo">
+        <div>
+          <h2 class="titulo-secao-catalogo">Todos os quizzes</h2>
+        </div>
+        <!--
+          Botão e não link: criar exige conta, e quem não tem
+          precisa cair no login e voltar para cá, não abrir um
+          editor que vai recusar o primeiro salvamento.
+        -->
+        <button id="botao-novo">+ Novo quiz</button>
       </div>
+
+      <div class="filtros" id="filtros"></div>
+      <div class="catalogo" id="catalogo"></div>
+      <div id="catalogo-vazio" class="vazio escondido"></div>
     </section>
 
-    <!-- 3. Responder -->
+    <!-- 3. Sala de espera -->
+    <section id="tela-espera" class="escondido">
+      <div class="cartao painel-codigo">
+        <div style="color:var(--texto-fraco);font-size:14px">entre em</div>
+        <div class="instrucao" style="margin:4px 0 18px"><strong id="endereco"></strong></div>
+        <div style="color:var(--texto-fraco);font-size:14px">com o código</div>
+        <div class="codigo-grande" id="codigo"></div>
+      </div>
+
+      <div class="barra-sala">
+        <!--
+          Editar abre em OUTRA ABA de propósito: sair desta
+          página derrubaria a conexão do apresentador, e a sala
+          com ela. Numa aba separada, o telão continua de pé com
+          o código visível enquanto você mexe nas perguntas.
+        -->
+        <a id="link-editar" href="editor.html" target="_blank" rel="noopener">
+          <button class="discreto">Editar perguntas</button>
+        </a>
+        <span class="nota-sala">
+          as mudanças valem a partir do momento em que a partida começar
+        </span>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:16px;margin:24px 0 10px">
+        <h2 style="margin:0;flex:1">Quem já entrou</h2>
+        <button id="botao-comecar" disabled>Começar partida</button>
+      </div>
+
+      <div class="contagem"><strong id="total">0</strong> jogador(es)</div>
+      <ul class="jogadores" id="lista"></ul>
+      <div id="ninguem" class="vazio">Ninguém ainda. Projete esta tela e espere.</div>
+    </section>
+
+    <!-- 4. Pergunta no ar -->
     <section id="tela-pergunta" class="escondido">
       <div class="barra-pergunta">
         <span id="posicao"></span>
         <span class="cronometro" id="cronometro">--</span>
       </div>
 
-      <div class="enunciado" id="enunciado"></div>
-      <ul class="alternativas escolhiveis" id="alternativas"></ul>
+      <div class="cartao">
+        <div class="enunciado" id="enunciado"></div>
+        <ul class="alternativas" id="alternativas"></ul>
+      </div>
 
-      <div id="aguardando" class="aviso escondido" style="margin-top:18px">
-        Resposta enviada. Aguardando os outros…
+      <div style="display:flex;align-items:center;gap:16px;margin-top:20px">
+        <div class="contagem" style="flex:1;margin:0">
+          <strong id="responderam">0</strong> de <span id="total-jogadores">0</span> já responderam
+        </div>
+        <button id="botao-encerrar" class="discreto">Encerrar agora</button>
       </div>
     </section>
 
-    <!-- 4. Resultado da pergunta -->
+    <!-- 5. Resultado da pergunta -->
     <section id="tela-resultado" class="escondido">
-      <div class="cartao" style="text-align:center">
-        <div class="veredito" id="veredito"></div>
-        <div class="ganhos" id="ganhos"></div>
-        <div style="color:var(--texto-fraco);margin-top:18px">
-          seu total: <strong id="meu-total">0</strong>
-        </div>
+      <h1 id="titulo-resultado">Resultado</h1>
+
+      <div class="cartao">
+        <ul class="alternativas" id="distribuicao"></ul>
       </div>
 
       <h2>Placar</h2>
       <ol class="placar" id="placar"></ol>
+
+      <button id="botao-proxima" style="margin-top:20px">Próxima pergunta</button>
     </section>
 
-    <!-- 5. Fim -->
+    <!-- 6. Fim -->
     <section id="tela-fim" class="escondido">
       <h1>Fim da partida</h1>
-      <div class="cartao" style="text-align:center;margin-bottom:24px">
-        <div class="veredito" id="colocacao"></div>
-      </div>
+      <p class="subtitulo">Placar final.</p>
       <ol class="placar" id="placar-final"></ol>
+      <button class="discreto" style="margin-top:24px" onclick="location.reload()">
+        Voltar ao início
+      </button>
     </section>
   </div>
 
 <script type="module">
 // ============================================================
-// Tela do jogador
+// Tela do apresentador
 //
-// Repare no que esta página NÃO faz: ela nunca pergunta ao
-// servidor se algo mudou. Abre a conexão uma vez e fica ouvindo.
-// Pergunta, cronômetro, resultado e placar chegam sem ser
-// pedidos.
+// Duas conversas com o mesmo servidor:
+//
+//   HTTP       login, listar quizzes, abrir a sala
+//              (acontece uma vez e tem resposta)
+//
+//   WebSocket  jogadores entrando, perguntas, respostas, placar
+//              (acontece o tempo todo e ninguém pediu)
 // ============================================================
 
 import { criarConexao, pintarEstado } from "./conexao.js";
+import { artePorCategoria, coresDaCategoria } from "./capas.js";
 
 const $ = (id) => document.getElementById(id);
 
-const telas = ["entrada", "espera", "pergunta", "resultado", "fim"];
+const telas = ["login", "quizzes", "espera", "pergunta", "resultado", "fim"];
 const mostrar = (nome) => {
   for (const tela of telas) {
     $(`tela-${tela}`).classList.toggle("escondido", tela !== nome);
@@ -115,154 +198,741 @@ const mostrar = (nome) => {
 };
 
 let conexao = null;
+let eu = null;
+
+/**
+ * O que a pessoa ia fazer quando bateu no login.
+ *
+ * Guardado para ser executado depois de entrar. Sem isto, todo
+ * login termina no catálogo e a pessoa precisa procurar de novo
+ * o botão que ela já havia clicado.
+ */
+let pendencia = null;
+
 let codigoSala = null;
-let apelido = null;
-let meuId = null;
+let quizDaSala = null;
 let cronometro = null;
-let meuResultado = null;
 
-// sessionStorage e não localStorage: a identidade vale para ESTA
-// aba e esta partida. Com localStorage, abrir o quiz de novo
-// amanhã tentaria retomar um lugar numa sala que já não existe.
-const GUARDADO = "quiz-jogador";
+async function pedir(metodo, caminho, corpo) {
+  const resposta = await fetch(caminho, {
+    method: metodo,
+    headers: corpo ? { "Content-Type": "application/json" } : {},
+    body: corpo ? JSON.stringify(corpo) : undefined
+  });
 
-function mostrarErro(mensagem) {
-  $("erro").textContent = mensagem;
-  $("erro").classList.remove("escondido");
-  $("botao").disabled = false;
-  mostrar("entrada");
+  const dados = resposta.headers.get("content-type")?.includes("json")
+    ? await resposta.json()
+    : null;
+
+  if (!resposta.ok) throw new Error(dados?.erro ?? "Erro inesperado");
+  return dados;
 }
 
-// ----- Retomar sozinho, se a aba foi recarregada no meio -----
-try {
-  const guardado = JSON.parse(sessionStorage.getItem(GUARDADO) ?? "null");
-  if (guardado?.codigo && guardado?.apelido) {
-    codigoSala = guardado.codigo;
-    apelido = guardado.apelido;
-    meuId = guardado.id;
-    abrirConexao();
-  }
-} catch {
-  // sessionStorage pode estar bloqueado (navegação anônima com
-  // restrições). Não é motivo para a página não funcionar.
-}
+// ----- Abertura -----
+//
+// A ORDEM AQUI É A MUDANÇA PRINCIPAL DA TELA.
+//
+// O catálogo carrega primeiro e sozinho, porque é público. Saber
+// quem está olhando vem depois, e não decide mais se a tela
+// aparece — decide só o que os botões fazem.
+//
+// Antes era o inverso: perguntava a identidade e, sem sessão,
+// mostrava um login. O site tinha conteúdo para mostrar e
+// mostrava um formulário.
+//
+// As duas chamadas não são sequenciais de propósito: o catálogo
+// não depende da resposta de quem sou eu, então esperar uma para
+// começar a outra só somaria latência.
+carregarQuizzes();
+identificar();
 
-$("formulario").addEventListener("submit", async (evento) => {
-  evento.preventDefault();
-
-  $("erro").classList.add("escondido");
-  $("botao").disabled = true;
-
-  codigoSala = $("codigo").value.trim().toUpperCase();
-  apelido = $("apelido").value.trim();
-  meuId = null;
-
-  // Confere a sala por HTTP ANTES de abrir o WebSocket. Dá para
-  // pular e deixar o WebSocket recusar — mas aí a pessoa veria
-  // "desconectado" em vez de "sala não encontrada", que é a
-  // informação de que ela precisa para corrigir o que digitou.
+/**
+ * Descobre se há sessão e acerta o topo.
+ *
+ * O cookie é httpOnly: o JavaScript não consegue lê-lo, então a
+ * única forma de saber se há sessão é perguntando ao servidor.
+ * Falha aqui significa visitante — nunca um erro na tela, que
+ * para quem só quer olhar o catálogo seria ruído sobre algo que
+ * não pediu.
+ */
+async function identificar() {
   try {
-    const resposta = await fetch(`/api/salas/${codigoSala}`);
-    if (!resposta.ok) {
-      const { erro } = await resposta.json();
-      return mostrarErro(erro ?? "Sala não encontrada");
-    }
+    const { usuario } = await pedir("GET", "/api/usuarios/eu");
+    eu = usuario;
   } catch {
-    return mostrarErro("Não consegui falar com o servidor");
+    eu = null;
   }
 
-  abrirConexao();
+  desenharConta();
+}
+
+function desenharConta() {
+  const area = $("area-conta");
+  area.innerHTML = "";
+
+  if (!eu) {
+    const entrar = document.createElement("button");
+    entrar.className = "discreto";
+    entrar.textContent = "Entrar";
+    entrar.addEventListener("click", () => pedirConta("Entre para criar e apresentar quizzes."));
+    area.append(entrar);
+    return;
+  }
+
+  const nome = document.createElement("span");
+  nome.className = "nome-conta";
+  nome.textContent = eu.nome;
+
+  const sair = document.createElement("button");
+  sair.className = "discreto";
+  sair.textContent = "Sair";
+  sair.addEventListener("click", async () => {
+    sair.disabled = true;
+    try {
+      await pedir("DELETE", "/api/sessoes");
+    } catch {
+      // Sessão já morta no servidor dá o mesmo resultado que
+      // apagá-la: ninguém logado. Não vale travar a tela por
+      // isso.
+    }
+    eu = null;
+    desenharConta();
+    // O catálogo é o mesmo, mas `meu` mudou em toda linha — e é
+    // ele que decide quem mostra "Editar".
+    carregarQuizzes();
+  });
+
+  area.append(nome, sair);
+}
+
+/**
+ * Pede conta para continuar.
+ *
+ * Recebe o motivo (que vira o subtítulo do login, para a pessoa
+ * saber por que foi parada) e, opcionalmente, o que fazer depois
+ * de entrar.
+ */
+function pedirConta(motivo, depois) {
+  pendencia = depois ?? null;
+  $("motivo-login").textContent = motivo;
+  $("erro-login").classList.add("escondido");
+  mostrar("login");
+}
+
+$("voltar-catalogo").addEventListener("click", (evento) => {
+  evento.preventDefault();
+  pendencia = null;
+  mostrar("quizzes");
 });
+
+$("botao-novo").addEventListener("click", () => {
+  if (!eu) {
+    return pedirConta(
+      "Crie uma conta ou entre para fazer o seu quiz.",
+      () => (location.href = "editor.html")
+    );
+  }
+  location.href = "editor.html";
+});
+
+$("formulario-login").addEventListener("submit", async (evento) => {
+  evento.preventDefault();
+  $("erro-login").classList.add("escondido");
+
+  try {
+    const { usuario } = await pedir("POST", "/api/sessoes", {
+      email: $("email").value,
+      senha: $("senha").value
+    });
+
+    eu = usuario ?? null;
+    desenharConta();
+
+    // Recarrega porque `meu` mudou em toda linha do catálogo, e
+    // é ele que decide o que cada cartão oferece.
+    await carregarQuizzes();
+
+    // E só então volta ao que a pessoa estava fazendo.
+    const retomar = pendencia;
+    pendencia = null;
+    if (retomar) retomar();
+  } catch (erro) {
+    $("erro-login").textContent = erro.message;
+    $("erro-login").classList.remove("escondido");
+  }
+});
+
+// ============================================================
+// Catálogo
+//
+// Vitrine no topo, fileiras por critério e a grade completa
+// embaixo — o formato de catálogo de leitura, onde o olho
+// percorre capas antes de ler nomes.
+//
+// Regra que vale mais que o layout: FILEIRA SÓ APARECE SE TIVER
+// CRITÉRIO REAL. Cada uma mede acessos num período, e quiz com
+// zero acesso não entra. Uma vitrine que inventa destaque
+// engana quem a lê — e, pior, engana quem a construiu, que
+// passa a confiar num número que não existe.
+//
+// Quiz não tem imagem de capa, e pedir upload seria atrito logo
+// na criação. A capa é DESENHADA a partir do título: mesmo
+// título, sempre as mesmas cores e iniciais. É original por
+// construção, custa zero e não levanta questão de direito de
+// imagem — que uma capa ilustrada de "Naruto" levantaria.
+// ============================================================
+
+const CATEGORIAS = {
+  geral: "Geral", anime: "Anime", games: "Games", filmes: "Filmes",
+  musica: "Música", esportes: "Esportes", historia: "História",
+  ciencia: "Ciência", tecnologia: "Tecnologia", educacao: "Educação"
+};
+
+// Poucos pares e bem distintos: com trinta variações tudo vira
+// ruído e nenhuma capa fica reconhecível.
+const CAPAS = [
+  ["#4ea3ff", "#1d4ed8"], ["#48c78e", "#0f766e"],
+  ["#f2a33c", "#b45309"], ["#ef5e64", "#9f1239"],
+  ["#a78bfa", "#6d28d9"], ["#22d3ee", "#0e7490"],
+  ["#f472b6", "#9d174d"], ["#facc15", "#a16207"]
+];
+
+/** Número estável a partir do texto — a capa não pode mudar a cada carregamento. */
+function semente(texto) {
+  let valor = 0;
+  for (const letra of texto) valor = (valor * 31 + letra.codePointAt(0)) % 100000;
+  return valor;
+}
+
+/**
+ * As cores da capa agora saem da CATEGORIA, não do título.
+ *
+ * Antes cada quiz tinha a sua cor própria, sorteada do nome.
+ * Ficava bonito e dizia nada: duas cores vizinhas não tinham
+ * relação nenhuma entre si. Vindo da categoria, a cor passa a
+ * ser informação — você aprende que roxo é games e laranja é
+ * música sem ler um rótulo.
+ */
+function coresDe(quiz) {
+  return coresDaCategoria(typeof quiz === "string" ? "geral" : quiz.categoria);
+}
+
+/** Até duas iniciais, para a capa não virar parede de texto. */
+function iniciais(titulo) {
+  const palavras = titulo.trim().split(/\s+/).filter((p) => p.length > 1);
+  if (palavras.length === 0) return titulo.slice(0, 2).toUpperCase();
+  return palavras.slice(0, 2).map((p) => p[0]).join("").toUpperCase();
+}
+
+let filtroAtual = null;
+let todosOsQuizzes = [];
+let idDestaque = null;
+
+async function carregarQuizzes() {
+  mostrar("quizzes");
+
+  try {
+    const { quizzes } = await pedir("GET", "/api/quizzes");
+    todosOsQuizzes = quizzes;
+
+    // Mantém o destaque escolhido se ele ainda existe; senão,
+    // elege o mais apresentado, e no empate o mais novo.
+    // Vale tanto para o primeiro carregamento quanto para o caso
+    // de o destaque escolhido à mão ter ficado sem perguntas
+    // desde então.
+    const atual = todosOsQuizzes.find((q) => q.id === idDestaque);
+    if (!atual || atual.perguntas === 0) {
+      idDestaque = eleitoParaDestaque()?.id ?? null;
+    }
+
+    desenharDestaque();
+    desenharFileiras();
+    desenharFiltros();
+    desenharCatalogo();
+  } catch (erro) {
+    $("erro-quizzes").textContent = erro.message;
+    $("erro-quizzes").classList.remove("escondido");
+  }
+}
+
+/**
+ * A vitrine mostra os MAIS ACESSADOS — não um por categoria.
+ *
+ * Empate em zero acesso (sistema novo, ninguém apresentou nada
+ * ainda) cai no mais recente, para a vitrine não nascer vazia.
+ */
+function maisAcessados() {
+  return [...todosOsQuizzes].sort(
+    (a, b) => b.partidas - a.partidas || new Date(b.criado_em) - new Date(a.criado_em)
+  );
+}
+
+function eleitoParaDestaque() {
+  // A VITRINE SÓ EXIBE O QUE ABRE.
+  //
+  // Quiz sem pergunta não abre sala, então destacá-lo é dar o
+  // lugar mais visível do site a um botão morto. Quizzes antigos,
+  // de antes da regra que exige pelo menos uma pergunta, ainda
+  // existem e competiam por esse espaço.
+  //
+  // O fallback mantém a vitrine de pé num catálogo em que NENHUM
+  // quiz tem pergunta: melhor mostrar o item desabilitado do que
+  // abrir o site com um buraco onde deveria estar o banner.
+  const jogaveis = maisAcessados().filter((q) => q.perguntas > 0);
+  return jogaveis[0] ?? maisAcessados()[0];
+}
+
+// ---------- Vitrine ----------
+function desenharDestaque() {
+  const caixa = $("destaque");
+  const quiz = todosOsQuizzes.find((q) => q.id === idDestaque);
+
+  caixa.classList.toggle("escondido", !quiz);
+  if (!quiz) return;
+
+  caixa.innerHTML = "";
+
+  const [fundo, traco] = coresDe(quiz);
+
+  // O fundo repete as cores da capa, bem apagadas: amarra a
+  // vitrine ao item sem competir com o texto por cima.
+  caixa.style.background =
+    "radial-gradient(900px 420px at 18% 50%, " + traco + "26, transparent 70%), var(--superficie)";
+
+  const capa = document.createElement("div");
+  capa.className = "capa capa-destaque";
+  montarCapa(capa, quiz, true);
+
+  const texto = document.createElement("div");
+  texto.className = "texto-destaque";
+
+  const linha = document.createElement("div");
+  linha.className = "linha-meta";
+  linha.append(
+    marcador(CATEGORIAS[quiz.categoria] ?? quiz.categoria),
+    marcador(quiz.perguntas + " pergunta" + (quiz.perguntas === 1 ? "" : "s")),
+    marcador(quiz.partidas > 0 ? quiz.partidas + " acessos" : "ainda n\u00e3o acessado")
+  );
+
+  const titulo = document.createElement("h1");
+  titulo.className = "titulo-destaque";
+  titulo.textContent = quiz.titulo;
+
+  const descricao = document.createElement("p");
+  descricao.className = "descricao-destaque";
+  descricao.textContent = quiz.descricao || "Sem descrição.";
+
+  const acoes = document.createElement("div");
+  acoes.className = "acoes-destaque";
+
+  const jogar = document.createElement("button");
+  jogar.textContent = quiz.perguntas === 0 ? "Sem perguntas" : "Abrir sala";
+  jogar.disabled = quiz.perguntas === 0;
+  jogar.addEventListener("click", () => abrirSala(quiz.id, jogar));
+
+  acoes.append(jogar);
+  texto.append(linha, titulo, descricao, acoes);
+
+  // Miniaturas para trocar o destaque, como a vitrine de um
+  // catálogo. Só fazem sentido com mais de um quiz.
+  const miniaturas = document.createElement("div");
+  miniaturas.className = "miniaturas";
+
+  if (todosOsQuizzes.length > 1) {
+    // As miniaturas são o pódio: os seis mais acessados, na
+    // ordem. É a mesma régua da vitrine, então clicar nelas
+    // percorre o ranking em vez de uma lista arbitrária.
+    const ordenados = maisAcessados().slice(0, 6);
+
+    for (const outro of ordenados) {
+      const cores = coresDe(outro);
+
+      const mini = document.createElement("button");
+      mini.className = "miniatura" + (outro.id === quiz.id ? " ativa" : "");
+      mini.title = outro.titulo;
+
+      // A miniatura é a mesma arte da capa, reduzida — e não uma
+      // sigla. Ela serve para reconhecer qual capa está na
+      // vitrine, então precisa parecer com a capa.
+      mini.innerHTML = artePorCategoria(outro.categoria);
+      mini.addEventListener("click", () => {
+        idDestaque = outro.id;
+        desenharDestaque();
+      });
+
+      miniaturas.append(mini);
+    }
+  }
+
+  caixa.append(capa, texto, miniaturas);
+}
+
+function marcador(texto) {
+  const span = document.createElement("span");
+  span.className = "marcador";
+  span.textContent = texto;
+  return span;
+}
+
+// ---------- Fileiras ----------
+function desenharFileiras() {
+  const caixa = $("fileiras");
+  caixa.innerHTML = "";
+
+  const fileiras = [
+    {
+      titulo: "Mais acessados",
+      nota: "de todos os tempos",
+      lista: ordenarPor(todosOsQuizzes, "partidas")
+    },
+    {
+      titulo: "Mais acessados da semana",
+      nota: "últimos 7 dias",
+      lista: ordenarPor(todosOsQuizzes, "acessos_semana")
+    },
+    {
+      titulo: "Mais acessados hoje",
+      nota: "desde a meia-noite",
+      lista: ordenarPor(todosOsQuizzes, "acessos_hoje")
+    },
+    {
+      titulo: "Criados recentemente",
+      nota: "os últimos que você fez",
+      lista: [...todosOsQuizzes]
+        .sort((a, b) => new Date(b.criado_em) - new Date(a.criado_em))
+        .slice(0, 12)
+    }
+  ];
+
+  // Fileira sem dado não entra. "Mais acessados hoje" com uma
+  // lista de zeros não seria uma fileira vazia — seria uma
+  // fileira que mente, sugerindo acesso onde não houve nenhum.
+  for (const fileira of fileiras) {
+    if (fileira.lista.length > 0) caixa.append(desenharFileira(fileira));
+  }
+}
+
+/**
+ * Ordena pelo campo e descarta quem tem zero.
+ *
+ * Descartar é o ponto: uma fileira "mais acessados" que inclui
+ * quizzes com zero acesso, só para encher a linha, transforma a
+ * vitrine em decoração. Melhor ela aparecer com três itens — ou
+ * não aparecer.
+ */
+function ordenarPor(lista, campo) {
+  return lista
+    .filter((q) => (q[campo] ?? 0) > 0)
+    .sort((a, b) => b[campo] - a[campo])
+    .slice(0, 12);
+}
+
+/**
+ * Encurta o número de acessos para caber na caixinha.
+ *
+ * 1.200 vira "1,2 mil": numa etiqueta de trinta pixels, o
+ * número exato não cabe nem interessa — a ordem de grandeza é a
+ * informação. O valor cheio fica no `title`, para quem quiser.
+ */
+function formatarAcessos(total) {
+  if (!total) return "0";
+  if (total < 1000) return String(total);
+
+  const milhares = total / 1000;
+  return (milhares < 10 ? milhares.toFixed(1).replace(".", ",") : Math.round(milhares)) + " mil";
+}
+
+/** Desenha uma fileira: cabeçalho em duas linhas e o trilho. */
+function desenharFileira(fileira) {
+  const secao = document.createElement("section");
+  secao.className = "fileira";
+
+  const cabecalho = document.createElement("div");
+  cabecalho.className = "cabecalho-fileira";
+
+  const h2 = document.createElement("h2");
+  h2.className = "titulo-secao-catalogo";
+  h2.textContent = fileira.titulo;
+
+  // A nota diz de onde vem o critério. Uma fileira chamada
+  // "mais acessados" sem dizer o período é afirmação sem lastro.
+  const legenda = document.createElement("span");
+  legenda.className = "nota-fileira";
+  legenda.textContent = fileira.nota;
+
+  cabecalho.append(h2, legenda);
+
+  // Rolagem horizontal: a fileira mostra o começo e sugere que
+  // há mais, em vez de quebrar em linhas e virar outra grade.
+  const trilho = document.createElement("div");
+  trilho.className = "trilho";
+
+  for (const quiz of fileira.lista) trilho.append(desenharCartao(quiz, true));
+
+  secao.append(cabecalho, trilho);
+  return secao;
+}
+
+// ---------- Filtros e grade ----------
+function desenharFiltros() {
+  const filtros = $("filtros");
+  filtros.innerHTML = "";
+
+  // Só categorias que têm quiz: aba vazia é beco sem saída.
+  const presentes = [...new Set(todosOsQuizzes.map((q) => q.categoria))];
+  if (presentes.length <= 1) return;
+
+  const opcoes = [[null, "Tudo"]].concat(presentes.map((c) => [c, CATEGORIAS[c] ?? c]));
+
+  for (const [valor, rotulo] of opcoes) {
+    const botao = document.createElement("button");
+    botao.className = "filtro" + (filtroAtual === valor ? " ativo" : "");
+    botao.textContent = rotulo;
+    botao.addEventListener("click", () => {
+      filtroAtual = valor;
+      desenharFiltros();
+      desenharCatalogo();
+    });
+    filtros.append(botao);
+  }
+}
+
+function desenharCatalogo() {
+  const catalogo = $("catalogo");
+  catalogo.innerHTML = "";
+
+  const lista = filtroAtual
+    ? todosOsQuizzes.filter((q) => q.categoria === filtroAtual)
+    : todosOsQuizzes;
+
+  const vazio = $("catalogo-vazio");
+  vazio.classList.toggle("escondido", lista.length > 0);
+
+  if (lista.length === 0) {
+    vazio.innerHTML = todosOsQuizzes.length === 0
+      ? 'Nenhum quiz ainda. Clique em <strong>+ Novo quiz</strong> para criar o primeiro.'
+      : "Nenhum quiz nesta categoria.";
+    return;
+  }
+
+  for (const quiz of lista) catalogo.append(desenharCartao(quiz));
+}
+
+// ---------- Cartão ----------
+function desenharCartao(quiz, estreito) {
+  const cartao = document.createElement("article");
+  cartao.className = "card-quiz" + (estreito ? " estreito" : "");
+
+  const capa = document.createElement("div");
+  capa.className = "capa";
+  montarCapa(capa, quiz, false);
+
+  const selo = document.createElement("span");
+  selo.className = "selo-categoria";
+  selo.textContent = CATEGORIAS[quiz.categoria] ?? quiz.categoria;
+
+  // Contador no canto oposto ao selo: um de cada lado, para os
+  // dois serem lidos de relance sem se atrapalharem.
+  const contador = document.createElement("span");
+  contador.className = "selo-acessos";
+  contador.textContent = formatarAcessos(quiz.partidas);
+  contador.title = quiz.partidas + " vez(es) apresentado";
+
+  // Quiz sem pergunta não abre sala; dizer isso na capa evita o
+  // clique frustrado num botão desabilitado sem explicação.
+  const aviso = document.createElement("span");
+  aviso.className = "selo-aviso";
+  aviso.textContent = "sem perguntas";
+  if (quiz.perguntas > 0) aviso.classList.add("escondido");
+
+  const acoes = document.createElement("div");
+  acoes.className = "acoes-capa";
+
+  // Só "Abrir sala". Editar deixou de morar aqui: quem vai
+  // apresentar abre a sala primeiro e ajusta as perguntas lá
+  // dentro, com o código já no telão. Assim a ordem da tela
+  // acompanha a ordem do que a pessoa realmente faz.
+  const jogar = document.createElement("button");
+  jogar.textContent = quiz.perguntas === 0 ? "Sem perguntas" : "Abrir sala";
+  jogar.disabled = quiz.perguntas === 0;
+  jogar.addEventListener("click", () => abrirSala(quiz.id, jogar));
+
+  acoes.append(jogar);
+
+  // Editar só no que é seu. O cartão de outra pessoa não ganha
+  // um botão desabilitado: oferecer e negar é pior que não
+  // oferecer. Quem quiser mexer usa Duplicar, dentro do editor
+  // da própria cópia.
+  if (quiz.meu) {
+    const editar = document.createElement("a");
+    editar.href = "editor.html?id=" + quiz.id;
+    editar.innerHTML = '<button class="discreto">Editar</button>';
+    acoes.append(editar);
+  }
+
+  capa.append(selo, contador, aviso, acoes);
+
+  const titulo = document.createElement("h3");
+  titulo.className = "titulo-card";
+  titulo.textContent = quiz.titulo; // texto, nunca innerHTML
+
+  // O número de acessos saiu daqui: ele agora mora na capa, no
+  // canto esquerdo. Embaixo fica o tamanho do quiz e de quem
+  // ele é — o autor passou a importar quando o catálogo deixou
+  // de ser a sua própria lista.
+  const meta = document.createElement("div");
+  meta.className = "meta-card";
+  meta.textContent = quiz.perguntas + " pergunta" + (quiz.perguntas === 1 ? "" : "s");
+
+  if (quiz.autor) {
+    const autor = document.createElement("span");
+    autor.className = "autor-card";
+    autor.textContent = quiz.meu ? "você" : quiz.autor;
+    meta.append(" · ", autor);
+  }
+
+  cartao.append(capa, titulo, meta);
+
+  // Licença livre exige atribuir o autor. Crédito escondido não
+  // cumpre a licença — então ele aparece, pequeno, mas aparece.
+  if (quiz.imagem_credito) {
+    const credito = document.createElement("div");
+    credito.className = "credito-capa";
+    credito.textContent = quiz.imagem_credito;
+    cartao.append(credito);
+  }
+
+  return cartao;
+}
+
+/**
+ * Monta o miolo de uma capa. UMA imagem, nunca duas sobrepostas.
+ *
+ *   1. imagem própria do quiz, se a pessoa pôs uma
+ *   2. senão, o desenho da categoria
+ *
+ * O emoji do tema NÃO entra aqui. Ele já esteve: desenho ao
+ * fundo com emoji por cima virava duas figuras disputando o
+ * mesmo espaço, e nenhuma das duas lia bem. Agora ele aparece
+ * ao lado do título, pequeno — informa sem poluir.
+ */
+function montarCapa(capa, quiz, grande) {
+  if (quiz.imagem_url) {
+    // <img> e não background-image: assim o navegador trata como
+    // imagem de verdade — carrega sob demanda, e um endereço
+    // quebrado dispara onerror em vez de deixar um buraco.
+    const foto = document.createElement("img");
+    foto.className = "foto-capa";
+    foto.src = quiz.imagem_url;
+    foto.alt = "";
+    foto.loading = "lazy";
+
+    // Endereço de fora pode sumir a qualquer momento. Se sumir,
+    // cai no desenho da categoria em vez de mostrar o ícone de
+    // imagem quebrada.
+    foto.addEventListener("error", () => {
+      foto.remove();
+      capa.insertAdjacentHTML("afterbegin", artePorCategoria(quiz.categoria));
+    });
+
+    capa.append(foto);
+  } else {
+    capa.insertAdjacentHTML("beforeend", artePorCategoria(quiz.categoria));
+  }
+}
+
+async function abrirSala(quizId, botao) {
+  // A sala tem um apresentador, e apresentador precisa ser
+  // alguém: é ele que o servidor reconhece ao reconectar, e sem
+  // isso qualquer um assumiria o controle de uma partida em
+  // andamento. Daí o login aqui — não por ser dono do quiz, que
+  // apresentar não exige.
+  if (!eu) {
+    return pedirConta(
+      "Entre para abrir uma sala e apresentar.",
+      () => abrirSala(quizId, botao)
+    );
+  }
+
+  botao.disabled = true;
+
+  try {
+    const { sala } = await pedir("POST", "/api/salas", { quiz_id: quizId });
+
+    quizDaSala = quizId;
+    $("link-editar").href = "editor.html?id=" + quizId;
+
+    codigoSala = sala.codigo;
+    $("codigo").textContent = sala.codigo;
+
+    // location.host e não endereço fixo: se você abrir esta
+    // página pelo IP da rede, é esse endereço que precisa
+    // aparecer no telão — senão o celular tenta "localhost" e
+    // chega no próprio aparelho.
+    $("endereco").textContent = location.host;
+
+    mostrar("espera");
+    abrirConexao();
+  } catch (erro) {
+    botao.disabled = false;
+    $("erro-quizzes").textContent = erro.message;
+    $("erro-quizzes").classList.remove("escondido");
+  }
+}
 
 function abrirConexao() {
   conexao = criarConexao({
-    // Roda a cada conexão, inclusive nas reconexões. O meuId
-    // viaja junto: é ele que faz o servidor devolver o MESMO
-    // lugar, com a pontuação, em vez de recusar por "apelido em
-    // uso" — pelo próprio fantasma de quem caiu.
-    aoAbrir: () =>
-      conexao.enviar({ tipo: "entrar", codigo: codigoSala, apelido, jogadorId: meuId }),
+    // Roda a cada conexão, inclusive nas reconexões: é o que faz
+    // o apresentador reassumir a sala sozinho depois de uma
+    // queda, sem precisar recarregar a página.
+    aoAbrir: () => conexao.enviar({ tipo: "apresentar", codigo: codigoSala }),
     aoReceber: tratar,
     aoMudarEstado: (estado) => pintarEstado($("estado"), estado)
   });
 }
 
+// ----- As mensagens do servidor -----
 function tratar(mensagem) {
-  if (mensagem.tipo === "erro") {
-    // Erros de regra do jogo (respondeu duas vezes, tempo
-    // esgotado) não derrubam a conexão nem a tela.
-    if (["ja-respondeu", "tempo-esgotado", "nao-ha-pergunta-aberta"].includes(mensagem.codigo)) {
-      return;
-    }
-    sessionStorage.removeItem(GUARDADO);
-    return mostrarErro(mensagem.mensagem);
-  }
-
-  if (mensagem.tipo === "bem-vindo") {
-    meuId = mensagem.voce.id;
-
-    try {
-      sessionStorage.setItem(
-        GUARDADO,
-        JSON.stringify({ codigo: codigoSala, apelido, id: meuId })
-      );
-    } catch {}
-
-    $("titulo-sala").textContent = mensagem.sala.titulo;
-    $("meu-apelido").textContent = mensagem.voce.apelido;
-
-    // Se a partida já estava rolando quando reconectei, a
-    // próxima pergunta me recoloca no jogo sozinha.
-    if (mensagem.sala.fase === "aguardando") mostrar("espera");
-    return;
-  }
-
   if (mensagem.tipo === "jogadores") {
     const lista = $("lista");
     lista.innerHTML = "";
 
     for (const jogador of mensagem.jogadores) {
       const item = document.createElement("li");
-      // textContent, não innerHTML: o apelido é texto que um
-      // desconhecido digitou. Com innerHTML, alguém entraria com
-      // <img onerror=...> e executaria código na tela de todos.
-      item.textContent = jogador.apelido;
+      item.textContent = jogador.apelido; // apelido é texto de desconhecido
       if (!jogador.online) item.classList.add("offline");
       lista.append(item);
     }
 
     $("total").textContent = mensagem.jogadores.length;
+    $("total-jogadores").textContent = mensagem.jogadores.length;
+    $("ninguem").classList.toggle("escondido", mensagem.jogadores.length > 0);
+    $("botao-comecar").disabled = mensagem.jogadores.length === 0;
     return;
   }
 
   if (mensagem.tipo === "pergunta") return mostrarPergunta(mensagem);
-  if (mensagem.tipo === "resposta-recebida") return travarAlternativas();
-  if (mensagem.tipo === "sua-resposta") {
-    meuResultado = mensagem;
-
-    // Se a tela de resultado já estiver aberta, repinta. Ordem de
-    // chegada de mensagens não é promessa de ninguém, e uma tela
-    // que depende dela quebra no dia em que a rede atrasar uma.
-    if (!$("tela-resultado").classList.contains("escondido")) pintarVeredito();
-    return;
-  }
+  if (mensagem.tipo === "respondeu") return ($("responderam").textContent = mensagem.quantos);
   if (mensagem.tipo === "resultado") return mostrarResultado(mensagem);
   if (mensagem.tipo === "fim") return mostrarFim(mensagem);
 
   if (mensagem.tipo === "sala-encerrada") {
     pararCronometro();
-    sessionStorage.removeItem(GUARDADO);
-    mostrarErro("O apresentador encerrou a sala.");
+    alert("A sala foi encerrada.");
+    location.reload();
+    return;
   }
+
+  if (mensagem.tipo === "erro") alert(mensagem.mensagem);
 }
 
+// ----- Pergunta no ar -----
 function mostrarPergunta(mensagem) {
   mostrar("pergunta");
-  $("aguardando").classList.add("escondido");
-  meuResultado = null;
 
   $("posicao").textContent = `Pergunta ${mensagem.indice + 1} de ${mensagem.total}`;
   $("enunciado").textContent = mensagem.enunciado;
+  $("responderam").textContent = "0";
 
   const lista = $("alternativas");
   lista.innerHTML = "";
@@ -279,28 +949,16 @@ function mostrarPergunta(mensagem) {
     texto.textContent = alternativa.texto;
 
     item.append(letra, texto);
-
-    item.addEventListener("click", () => {
-      if (lista.classList.contains("travada")) return;
-
-      item.classList.add("escolhida");
-      conexao.enviar({ tipo: "responder", alternativaId: alternativa.id });
-    });
-
     lista.append(item);
   }
 
   iniciarCronometro(mensagem.segundos);
 }
 
-function travarAlternativas() {
-  $("alternativas").classList.add("travada");
-  $("aguardando").classList.remove("escondido");
-}
-
-// O contador da tela é DESENHO. Quem decide se a resposta chegou
-// a tempo é o servidor, que carimbou a hora de início da
-// pergunta e mede contra ela.
+// O cronômetro da tela é DESENHO. Quem decide se a resposta
+// chegou a tempo é o servidor, que carimbou a hora de início e
+// mede contra ela. Se este contador mandasse, bastaria mexer no
+// relógio do computador para ganhar.
 function iniciarCronometro(segundos) {
   pararCronometro();
 
@@ -310,11 +968,7 @@ function iniciarCronometro(segundos) {
   cronometro = setInterval(() => {
     restante -= 1;
     $("cronometro").textContent = Math.max(0, restante);
-
-    if (restante <= 0) {
-      pararCronometro();
-      $("alternativas").classList.add("travada");
-    }
+    if (restante <= 0) pararCronometro();
   }, 1000);
 }
 
@@ -325,29 +979,45 @@ function pararCronometro() {
   }
 }
 
+// ----- Resultado -----
 function mostrarResultado(mensagem) {
   pararCronometro();
   mostrar("resultado");
 
-  pintarVeredito();
+  $("titulo-resultado").textContent = `Resultado da pergunta ${mensagem.indice + 1}`;
+  $("botao-proxima").textContent = mensagem.ultima ? "Ver placar final" : "Próxima pergunta";
 
-  const eu = mensagem.placar.find((p) => p.id === meuId);
-  $("meu-total").textContent = eu?.pontos ?? 0;
+  const maximo = Math.max(1, ...mensagem.distribuicao.map((d) => d.escolhas));
+  const lista = $("distribuicao");
+  lista.innerHTML = "";
 
-  desenharPlacar($("placar"), mensagem.placar);
-}
+  for (const [posicao, alternativa] of mensagem.distribuicao.entries()) {
+    const item = document.createElement("li");
+    item.className = alternativa.correta ? "certa" : "errada";
 
-function pintarVeredito() {
-  if (!meuResultado) {
-    $("veredito").textContent = "Você não respondeu";
-    $("veredito").className = "veredito errou";
-    $("ganhos").textContent = "";
-    return;
+    const letra = document.createElement("span");
+    letra.className = "letra";
+    letra.textContent = "ABCDEF"[posicao];
+
+    const texto = document.createElement("span");
+    texto.style.flex = "1";
+    texto.textContent = alternativa.texto;
+
+    const quantos = document.createElement("span");
+    quantos.className = "quantos";
+    quantos.textContent = alternativa.escolhas;
+
+    // A barra é largura proporcional, não um gráfico de verdade:
+    // a comparação entre as alternativas é tudo que interessa.
+    const barra = document.createElement("div");
+    barra.className = "barra";
+    barra.style.width = `${(alternativa.escolhas / maximo) * 100}%`;
+
+    item.append(barra, letra, texto, quantos);
+    lista.append(item);
   }
 
-  $("veredito").textContent = meuResultado.acertou ? "Acertou!" : "Errou";
-  $("veredito").className = `veredito ${meuResultado.acertou ? "acertou" : "errou"}`;
-  $("ganhos").textContent = meuResultado.ganhos > 0 ? `+${meuResultado.ganhos} pontos` : "";
+  desenharPlacar($("placar"), mensagem.placar);
 }
 
 function desenharPlacar(elemento, placar) {
@@ -355,16 +1025,15 @@ function desenharPlacar(elemento, placar) {
 
   for (const jogador of placar) {
     const item = document.createElement("li");
-    if (jogador.id === meuId) item.classList.add("eu");
 
-    const apelidoSpan = document.createElement("span");
-    apelidoSpan.textContent = jogador.apelido;
+    const apelido = document.createElement("span");
+    apelido.textContent = jogador.apelido;
 
     const pontos = document.createElement("span");
     pontos.className = "pontos";
     pontos.textContent = jogador.pontos;
 
-    item.append(apelidoSpan, pontos);
+    item.append(apelido, pontos);
     elemento.append(item);
   }
 }
@@ -372,14 +1041,13 @@ function desenharPlacar(elemento, placar) {
 function mostrarFim(mensagem) {
   pararCronometro();
   mostrar("fim");
-  sessionStorage.removeItem(GUARDADO);
-
-  const posicao = mensagem.placar.findIndex((p) => p.id === meuId);
-  $("colocacao").textContent =
-    posicao === -1 ? "Partida encerrada" : `${posicao + 1}º lugar`;
-
   desenharPlacar($("placar-final"), mensagem.placar);
 }
+
+// ----- Botões -----
+$("botao-comecar").addEventListener("click", () => conexao.enviar({ tipo: "comecar" }));
+$("botao-proxima").addEventListener("click", () => conexao.enviar({ tipo: "proxima" }));
+$("botao-encerrar").addEventListener("click", () => conexao.enviar({ tipo: "proxima" }));
 </script>
 </body>
 </html>

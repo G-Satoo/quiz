@@ -61,7 +61,15 @@ router.get(
  * POST /api/salas
  * body: { quiz_id }
  *
- * Abre uma sala para um quiz seu.
+ * Abre uma sala para um quiz do catálogo.
+ *
+ * Pede login — a sala tem um apresentador, que precisa ser
+ * alguém — mas não pede ser dono do quiz. Com o catálogo
+ * público, exigir posse aqui deixaria a maior parte da vitrine
+ * com um botão que só dá erro.
+ *
+ * Apresentar não muda o quiz: lê as perguntas e conta uma
+ * abertura. O que muda conteúdo continua trancado no dono.
  */
 router.post(
   "/",
@@ -77,14 +85,13 @@ router.post(
 
       if (quizId === null) return res.status(400).json({ erro: "Informe o quiz" });
 
-      // Confere dono e conta as perguntas na mesma consulta.
       const { rows } = await pool.query(
         `SELECT q.id, q.titulo,
                 (SELECT COUNT(*) FROM perguntas p
                   WHERE p.quiz_id = q.id AND p.ativa)::int AS perguntas
            FROM quizzes q
-          WHERE q.id = $1 AND q.usuario_id = $2`,
-        [quizId, req.usuarioId]
+          WHERE q.id = $1`,
+        [quizId]
       );
 
       if (rows.length === 0) {

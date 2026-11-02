@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Entrar na sala — Quiz</title>
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+  <div class="topo">
+    <div class="marca">quiz<span>.</span></div>
+    <div id="estado" class="estado"></div>
+  </div>
+
+  <div class="conteudo" style="max-width:460px">
+
+    <!-- 1. Entrar -->
+    <section id="tela-entrada">
+      <h1>Entrar na sala</h1>
+      <p class="subtitulo">Digite o código que está no telão.</p>
+
+      <div class="cartao">
+        <div id="erro" class="erro escondido"></div>
+
+        <form id="formulario">
+          <label for="codigo">Código da sala</label>
+          <input id="codigo" class="codigo" maxlength="6" autocomplete="off"
+                 autocapitalize="characters" spellcheck="false" required>
+
+          <label for="apelido">Seu apelido</label>
+          <input id="apelido" maxlength="20" autocomplete="off" required>
+
+          <button type="submit" class="largo" id="botao">Entrar</button>
+        </form>
+      </div>
+
+      <p style="text-align:center;margin-top:20px">
+        <a href="index.html" style="font-size:13px">← Ver o catálogo de quizzes</a>
+      </p>
+    </section>
+
+    <!-- 2. Esperando a partida -->
+    <section id="tela-espera" class="escondido">
+      <h1 id="titulo-sala"></h1>
+      <p class="subtitulo">Você entrou como <strong id="meu-apelido"></strong>.</p>
+
+      <div class="cartao">
+        <h2 style="margin-top:0">Na sala agora</h2>
+        <div class="contagem"><strong id="total">0</strong> pessoa(s)</div>
+        <ul class="jogadores" id="lista"></ul>
+        <p class="instrucao" style="margin-top:22px">
+          Aguardando o apresentador começar.
+        </p>
+      </div>
+    </section>
+
+    <!-- 3. Responder -->
+    <section id="tela-pergunta" class="escondido">
+      <div class="barra-pergunta">
+        <span id="posicao"></span>
+        <span class="cronometro" id="cronometro">--</span>
+      </div>
+
+      <div class="enunciado" id="enunciado"></div>
+      <ul class="alternativas escolhiveis" id="alternativas"></ul>
+
+      <div id="aguardando" class="aviso escondido" style="margin-top:18px">
+        Resposta enviada. Aguardando os outros…
+      </div>
+    </section>
+
+    <!-- 4. Resultado da pergunta -->
+    <section id="tela-resultado" class="escondido">
+      <div class="cartao" style="text-align:center">
+        <div class="veredito" id="veredito"></div>
+        <div class="ganhos" id="ganhos"></div>
+        <div style="color:var(--texto-fraco);margin-top:18px">
+          seu total: <strong id="meu-total">0</strong>
+        </div>
+      </div>
+
+      <h2>Placar</h2>
+      <ol class="placar" id="placar"></ol>
+    </section>
+
+    <!-- 5. Fim -->
+    <section id="tela-fim" class="escondido">
+      <h1>Fim da partida</h1>
+      <div class="cartao" style="text-align:center;margin-bottom:24px">
+        <div class="veredito" id="colocacao"></div>
+      </div>
+      <ol class="placar" id="placar-final"></ol>
+    </section>
+  </div>
+
+<script type="module">
+// ============================================================
+// Tela do jogador
+//
+// Repare no que esta página NÃO faz: ela nunca pergunta ao
+// servidor se algo mudou. Abre a conexão uma vez e fica ouvindo.
+// Pergunta, cronômetro, resultado e placar chegam sem ser
+// pedidos.
+// ============================================================
+
+import { criarConexao, pintarEstado } from "./conexao.js";
+
+const $ = (id) => document.getElementById(id);
+
+const telas = ["entrada", "espera", "pergunta", "resultado", "fim"];
+const mostrar = (nome) => {
+  for (const tela of telas) {
+    $(`tela-${tela}`).classList.toggle("escondido", tela !== nome);
+  }
+};
+
+let conexao = null;
+let codigoSala = null;
+let apelido = null;
+let meuId = null;
+let cronometro = null;
+let meuResultado = null;
+
+// sessionStorage e não localStorage: a identidade vale para ESTA
+// aba e esta partida. Com localStorage, abrir o quiz de novo
+// amanhã tentaria retomar um lugar numa sala que já não existe.
+const GUARDADO = "quiz-jogador";
+
+function mostrarErro(mensagem) {
+  $("erro").textContent = mensagem;
+  $("erro").classList.remove("escondido");
+  $("botao").disabled = false;
+  mostrar("entrada");
+}
+
+// ----- Retomar sozinho, se a aba foi recarregada no meio -----
+try {
+  const guardado = JSON.parse(sessionStorage.getItem(GUARDADO) ?? "null");
+  if (guardado?.codigo && guardado?.apelido) {
+    codigoSala = guardado.codigo;
+    apelido = guardado.apelido;
+    meuId = guardado.id;
+    abrirConexao();
+  }
+} catch {
+  // sessionStorage pode estar bloqueado (navegação anônima com
+  // restrições). Não é motivo para a página não funcionar.
+}
+
+$("formulario").addEventListener("submit", async (evento) => {
+  evento.preventDefault();
+
+  $("erro").classList.add("escondido");
+  $("botao").disabled = true;
+
+  codigoSala = $("codigo").value.trim().toUpperCase();
+  apelido = $("apelido").value.trim();
+  meuId = null;
+
+  // Confere a sala por HTTP ANTES de abrir o WebSocket. Dá para
+  // pular e deixar o WebSocket recusar — mas aí a pessoa veria
+  // "desconectado" em vez de "sala não encontrada", que é a
+  // informação de que ela precisa para corrigir o que digitou.
+  try {
+    const resposta = await fetch(`/api/salas/${codigoSala}`);
+    if (!resposta.ok) {
+      const { erro } = await resposta.json();
+      return mostrarErro(erro ?? "Sala não encontrada");
+    }
+  } catch {
+    return mostrarErro("Não consegui falar com o servidor");
+  }
+
+  abrirConexao();
+});
+
+function abrirConexao() {
+  conexao = criarConexao({
+    // Roda a cada conexão, inclusive nas reconexões. O meuId
+    // viaja junto: é ele que faz o servidor devolver o MESMO
+    // lugar, com a pontuação, em vez de recusar por "apelido em
+    // uso" — pelo próprio fantasma de quem caiu.
+    aoAbrir: () =>
+      conexao.enviar({ tipo: "entrar", codigo: codigoSala, apelido, jogadorId: meuId }),
+    aoReceber: tratar,
+    aoMudarEstado: (estado) => pintarEstado($("estado"), estado)
+  });
+}
+
+function tratar(mensagem) {
+  if (mensagem.tipo === "erro") {
+    // Erros de regra do jogo (respondeu duas vezes, tempo
+    // esgotado) não derrubam a conexão nem a tela.
+    if (["ja-respondeu", "tempo-esgotado", "nao-ha-pergunta-aberta"].includes(mensagem.codigo)) {
+      return;
+    }
+    sessionStorage.removeItem(GUARDADO);
+    return mostrarErro(mensagem.mensagem);
+  }
+
+  if (mensagem.tipo === "bem-vindo") {
+    meuId = mensagem.voce.id;
+
+    try {
+      sessionStorage.setItem(
+        GUARDADO,
+        JSON.stringify({ codigo: codigoSala, apelido, id: meuId })
+      );
+    } catch {}
+
+    $("titulo-sala").textContent = mensagem.sala.titulo;
+    $("meu-apelido").textContent = mensagem.voce.apelido;
+
+    // Se a partida já estava rolando quando reconectei, a
+    // próxima pergunta me recoloca no jogo sozinha.
+    if (mensagem.sala.fase === "aguardando") mostrar("espera");
+    return;
+  }
+
+  if (mensagem.tipo === "jogadores") {
+    const lista = $("lista");
+    lista.innerHTML = "";
+
+    for (const jogador of mensagem.jogadores) {
+      const item = document.createElement("li");
+      // textContent, não innerHTML: o apelido é texto que um
+      // desconhecido digitou. Com innerHTML, alguém entraria com
+      // <img onerror=...> e executaria código na tela de todos.
+      item.textContent = jogador.apelido;
+      if (!jogador.online) item.classList.add("offline");
+      lista.append(item);
+    }
+
+    $("total").textContent = mensagem.jogadores.length;
+    return;
+  }
+
+  if (mensagem.tipo === "pergunta") return mostrarPergunta(mensagem);
+  if (mensagem.tipo === "resposta-recebida") return travarAlternativas();
+  if (mensagem.tipo === "sua-resposta") {
+    meuResultado = mensagem;
+
+    // Se a tela de resultado já estiver aberta, repinta. Ordem de
+    // chegada de mensagens não é promessa de ninguém, e uma tela
+    // que depende dela quebra no dia em que a rede atrasar uma.
+    if (!$("tela-resultado").classList.contains("escondido")) pintarVeredito();
+    return;
+  }
+  if (mensagem.tipo === "resultado") return mostrarResultado(mensagem);
+  if (mensagem.tipo === "fim") return mostrarFim(mensagem);
+
+  if (mensagem.tipo === "sala-encerrada") {
+    pararCronometro();
+    sessionStorage.removeItem(GUARDADO);
+    mostrarErro("O apresentador encerrou a sala.");
+  }
+}
+
+function mostrarPergunta(mensagem) {
+  mostrar("pergunta");
+  $("aguardando").classList.add("escondido");
+  meuResultado = null;
+
+  $("posicao").textContent = `Pergunta ${mensagem.indice + 1} de ${mensagem.total}`;
+  $("enunciado").textContent = mensagem.enunciado;
+
+  const lista = $("alternativas");
+  lista.innerHTML = "";
+
+  for (const [posicao, alternativa] of mensagem.alternativas.entries()) {
+    const item = document.createElement("li");
+    item.dataset.id = alternativa.id;
+
+    const letra = document.createElement("span");
+    letra.className = "letra";
+    letra.textContent = "ABCDEF"[posicao];
+
+    const texto = document.createElement("span");
+    texto.textContent = alternativa.texto;
+
+    item.append(letra, texto);
+
+    item.addEventListener("click", () => {
+      if (lista.classList.contains("travada")) return;
+
+      item.classList.add("escolhida");
+      conexao.enviar({ tipo: "responder", alternativaId: alternativa.id });
+    });
+
+    lista.append(item);
+  }
+
+  iniciarCronometro(mensagem.segundos);
+}
+
+function travarAlternativas() {
+  $("alternativas").classList.add("travada");
+  $("aguardando").classList.remove("escondido");
+}
+
+// O contador da tela é DESENHO. Quem decide se a resposta chegou
+// a tempo é o servidor, que carimbou a hora de início da
+// pergunta e mede contra ela.
+function iniciarCronometro(segundos) {
+  pararCronometro();
+
+  let restante = segundos;
+  $("cronometro").textContent = restante;
+
+  cronometro = setInterval(() => {
+    restante -= 1;
+    $("cronometro").textContent = Math.max(0, restante);
+
+    if (restante <= 0) {
+      pararCronometro();
+      $("alternativas").classList.add("travada");
+    }
+  }, 1000);
+}
+
+function pararCronometro() {
+  if (cronometro) {
+    clearInterval(cronometro);
+    cronometro = null;
+  }
+}
+
+function mostrarResultado(mensagem) {
+  pararCronometro();
+  mostrar("resultado");
+
+  pintarVeredito();
+
+  const eu = mensagem.placar.find((p) => p.id === meuId);
+  $("meu-total").textContent = eu?.pontos ?? 0;
+
+  desenharPlacar($("placar"), mensagem.placar);
+}
+
+function pintarVeredito() {
+  if (!meuResultado) {
+    $("veredito").textContent = "Você não respondeu";
+    $("veredito").className = "veredito errou";
+    $("ganhos").textContent = "";
+    return;
+  }
+
+  $("veredito").textContent = meuResultado.acertou ? "Acertou!" : "Errou";
+  $("veredito").className = `veredito ${meuResultado.acertou ? "acertou" : "errou"}`;
+  $("ganhos").textContent = meuResultado.ganhos > 0 ? `+${meuResultado.ganhos} pontos` : "";
+}
+
+function desenharPlacar(elemento, placar) {
+  elemento.innerHTML = "";
+
+  for (const jogador of placar) {
+    const item = document.createElement("li");
+    if (jogador.id === meuId) item.classList.add("eu");
+
+    const apelidoSpan = document.createElement("span");
+    apelidoSpan.textContent = jogador.apelido;
+
+    const pontos = document.createElement("span");
+    pontos.className = "pontos";
+    pontos.textContent = jogador.pontos;
+
+    item.append(apelidoSpan, pontos);
+    elemento.append(item);
+  }
+}
+
+function mostrarFim(mensagem) {
+  pararCronometro();
+  mostrar("fim");
+  sessionStorage.removeItem(GUARDADO);
+
+  const posicao = mensagem.placar.findIndex((p) => p.id === meuId);
+  $("colocacao").textContent =
+    posicao === -1 ? "Partida encerrada" : `${posicao + 1}º lugar`;
+
+  desenharPlacar($("placar-final"), mensagem.placar);
+}
+</script>
+</body>
+</html>

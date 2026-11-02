@@ -101,7 +101,11 @@ describe("POST /api/salas", () => {
     assert.equal(resposta.status, 404);
   });
 
-  it("recusa abrir sala de quiz de outra pessoa", async () => {
+  it("abre sala de quiz de outra pessoa", async () => {
+    // Apresentar não muda o quiz: lê as perguntas e conta uma
+    // abertura. Com o catálogo público, exigir posse aqui
+    // deixaria a maior parte da vitrine com um botão que só dá
+    // erro. O que muda conteúdo continua trancado no dono.
     const sala = await criarSala();
 
     cliente.esquecerCookie();
@@ -112,7 +116,18 @@ describe("POST /api/salas", () => {
     });
 
     const resposta = await cliente.post("/api/salas", { quiz_id: sala.quizId });
-    assert.equal(resposta.status, 404);
+    assert.equal(resposta.status, 201);
+  });
+
+  it("exige login para abrir sala", async () => {
+    // A sala tem um apresentador, e apresentador precisa ser
+    // alguém: é ele que o servidor reconhece ao reconectar.
+    const sala = await criarSala();
+
+    cliente.esquecerCookie();
+    const resposta = await cliente.post("/api/salas", { quiz_id: sala.quizId });
+
+    assert.equal(resposta.status, 401);
   });
 
   it("guarda a sala no Redis com prazo de validade", async () => {

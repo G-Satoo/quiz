@@ -1,12 +1,27 @@
 // ============================================================
 // Rotas de quizzes
-// Prefixo: /api/quizzes  (todas exigem login)
+// Prefixo: /api/quizzes
+//
+// QUEM PODE O QUE
+//
+//   ler a lista e o quiz ....... qualquer um, sem login
+//   apresentar e duplicar ...... qualquer um logado
+//   editar, bloquear, apagar ... só o dono
+//
+// O catálogo é a porta de entrada do site, então ler não pede
+// login. Mudar pede, e mudar o que é de outra pessoa não é
+// permitido a ninguém — é o que separa "copiar para mexer" de
+// "mexer no que já funciona".
+//
+// O gabarito é a exceção que vale repetir: GET /:id devolve a
+// alternativa correta só para o dono. Catálogo aberto não pode
+// virar lista de respostas.
 // ============================================================
 
 import { Router } from "express";
 
 import { pool } from "../../db/pool.js";
-import { exigirLogin } from "../middlewares/autenticacao.js";
+import { exigirLogin, loginOpcional } from "../middlewares/autenticacao.js";
 import {
   lerInteiro,
   validarTitulo,
@@ -17,7 +32,14 @@ import {
 
 const router = Router();
 
-router.use(exigirLogin);
+// Toda rota aqui sabe QUEM é, mesmo quando não é ninguém: as
+// públicas usam isso para marcar o que é seu, e as privadas
+// acrescentam exigirLogin uma por uma. Preferi repetir o
+// exigirLogin em cada rota a trocá-lo por um router.use parcial
+// — assim quem lê a definição da rota vê a permissão dela ali, e
+// uma rota nova nasce com a decisão explícita em vez de herdar
+// silenciosamente a de cima.
+router.use(loginOpcional);
 
 /** Lê o :id da URL. Devolve null se não for um inteiro válido. */
 function lerId(valor) {
@@ -27,14 +49,25 @@ function lerId(valor) {
 /**
  * GET /api/quizzes
  *
- * Lista os quizzes do usuário com a contagem de perguntas — é o
- * que a tela de lista mostra, e evita o front ter que buscar
- * cada quiz inteiro só para contar.
+ * O catálogo. Público: é a primeira tela do site.
+ *
+ * Traz a contagem de perguntas junto para o front não ter que
+ * buscar cada quiz inteiro só para contar.
+ *
+ * ?categoria=anime  limita a uma categoria
+ * ?meus=1           só os seus (exige sessão; sem ela, vem vazio)
  */
 router.get("/", async (req, res, next) => {
   try {
     const pedida = req.query.categoria;
     const categoriaFiltro = validarCategoria(pedida) === null && pedida ? pedida : null;
+
+    // "Meus quizzes" sem estar logado devolve lista vazia, e não
+    // o catálogo inteiro. Errar para o lado de mostrar menos:
+    // devolver tudo a quem pediu "só os meus" seria mentir sobre
+    // de quem são aquelas linhas.
+    const soMeus = req.query.meus === "1";
+    if (soMeus && !req.usuarioId) return res.json({ quizzes: [] });
 
     const { rows } = await pool.query(
       // O filtro é opcional: $2 nulo devolve tudo. Assim a mesma
@@ -50,12 +83,17 @@ router.get("/", async (req, res, next) => {
               (SELECT COUNT(*) FILTER (WHERE a.ocorrido_em >= now() - interval '7 days')
                  FROM aberturas a WHERE a.quiz_id = q.id)::int AS acessos_semana,
               (SELECT COUNT(*) FILTER (WHERE a.ocorrido_em >= date_trunc('day', now()))
-                 FROM aberturas a WHERE a.quiz_id = q.id)::int AS acessos_hoje
+                 FROM aberturas a WHERE a.quiz_id = q.id)::int AS acessos_hoje,
+              u.nome AS autor,
+              (q.usuario_id = $1) AS meu
          FROM quizzes q
-        WHERE q.usuario_id = $1
+         JOIN usuarios u ON u.id = q.usuario_id
+        WHERE ($3::bool IS NOT TRUE OR q.usuario_id = $1)
           AND ($2::text IS NULL OR q.categoria = $2)
         ORDER BY q.criado_em DESC`,
-      [req.usuarioId, categoriaFiltro]
+      // $1 pode ser nulo (visitante): aí `meu` vem nulo em toda
+      // linha, que é a verdade — não há "seu" sem sessão.
+      [req.usuarioId, categoriaFiltro, soMeus]
     );
 
     res.json({ quizzes: rows });
@@ -81,18 +119,33 @@ router.get("/:id", async (req, res, next) => {
     if (id === null) return res.status(400).json({ erro: "Id inválido" });
 
     const { rows: quizzes } = await pool.query(
-      `SELECT id, titulo, descricao, categoria, criado_em, partidas, icone,
-              imagem_url, imagem_credito, imagem_pagina
-         FROM quizzes
-        WHERE id = $1 AND usuario_id = $2`,
+      `SELECT q.id, q.titulo, q.descricao, q.categoria, q.criado_em,
+              q.partidas, q.icone,
+              q.imagem_url, q.imagem_credito, q.imagem_pagina,
+              u.nome AS autor,
+              (q.usuario_id = $2) AS meu
+         FROM quizzes q
+         JOIN usuarios u ON u.id = q.usuario_id
+        WHERE q.id = $1`,
       [id, req.usuarioId]
     );
 
-    // 404 e não 403: dizer "existe, mas não é seu" já entrega que
-    // aquele id existe. Para quem não é dono, o quiz não existe.
     if (quizzes.length === 0) {
       return res.status(404).json({ erro: "Quiz não encontrado" });
     }
+
+    // DONO VÊ O QUIZ; VISITANTE VÊ A VITRINE.
+    //
+    // Esta é a linha mais importante da rota. O editor precisa do
+    // gabarito e das perguntas aposentadas; o catálogo público
+    // precisa de título, capa e de quantas perguntas tem. Se os
+    // dois recebessem a mesma coisa, bastaria abrir o DevTools
+    // antes de entrar na sala para jogar sabendo todas as
+    // respostas.
+    //
+    // Some `correta` e somem as inativas — que são rascunho
+    // aposentado, e não interessam a quem está só olhando.
+    const dono = quizzes[0].meu === true;
 
     const { rows: linhas } = await pool.query(
       `SELECT p.id, p.ordem, p.enunciado, p.segundos, p.ativa,
@@ -140,12 +193,20 @@ router.get("/:id", async (req, res, next) => {
           id: linha.alternativa_id,
           ordem: linha.alternativa_ordem,
           texto: linha.texto,
-          correta: linha.correta
+          // Omitir a chave é diferente de mandá-la falsa: um
+          // `correta: false` em toda alternativa seria uma
+          // afirmação errada. Ausente diz "não é da sua conta".
+          ...(dono ? { correta: linha.correta } : {})
         });
       }
     }
 
-    res.json({ quiz: { ...quizzes[0], perguntas } });
+    res.json({
+      quiz: {
+        ...quizzes[0],
+        perguntas: dono ? perguntas : perguntas.filter((p) => p.ativa)
+      }
+    });
   } catch (erro) {
     next(erro);
   }
@@ -166,7 +227,7 @@ router.get("/:id", async (req, res, next) => {
  * Quiz sem pergunta não é um quiz incompleto, é um quiz que não
  * existe. Então ou nasce inteiro, ou não nasce.
  */
-router.post("/", async (req, res, next) => {
+router.post("/", exigirLogin, async (req, res, next) => {
   const { titulo, descricao, categoria, icone, imagem, perguntas } = req.body ?? {};
 
   const erro =
@@ -248,7 +309,7 @@ async function inserirPerguntas(cliente, quizId, perguntas) {
  * PATCH /api/quizzes/:id
  * body: { titulo?, descricao? }
  */
-router.patch("/:id", async (req, res, next) => {
+router.patch("/:id", exigirLogin, async (req, res, next) => {
   try {
     const id = lerId(req.params.id);
     if (id === null) return res.status(400).json({ erro: "Id inválido" });
@@ -311,7 +372,7 @@ router.patch("/:id", async (req, res, next) => {
  * surte efeito depois de outro botão é um convite a esquecer o
  * segundo.
  */
-router.patch("/:id/perguntas/:perguntaId", async (req, res, next) => {
+router.patch("/:id/perguntas/:perguntaId", exigirLogin, async (req, res, next) => {
   try {
     const id = lerId(req.params.id);
     const perguntaId = lerId(req.params.perguntaId);
@@ -412,7 +473,7 @@ router.patch("/:id/perguntas/:perguntaId", async (req, res, next) => {
  * aposentadas por algum motivo, e carregar o lixo de outro quiz
  * para dentro do novo não ajudaria ninguém.
  */
-router.post("/:id/copia", async (req, res, next) => {
+router.post("/:id/copia", exigirLogin, async (req, res, next) => {
   const id = lerId(req.params.id);
   if (id === null) return res.status(400).json({ erro: "Id inválido" });
 
@@ -421,17 +482,21 @@ router.post("/:id/copia", async (req, res, next) => {
   try {
     await cliente.query("BEGIN");
 
-    // Hoje o catálogo mostra só os seus quizzes, então a cópia
-    // exige ser dono. Quando o catálogo virar público — que é
-    // para onde isto aponta —, esta checagem é a linha que
-    // muda: copiar passa a valer para qualquer quiz visível,
-    // enquanto editar continua exigindo ser dono.
+    // Sem usuario_id no WHERE, de propósito: copiar vale para
+    // qualquer quiz do catálogo, não só para os seus. É o que
+    // torna o catálogo público utilizável — quem gostou de um
+    // quiz alheio leva uma versão própria em vez de pedir
+    // permissão para mexer no original.
+    //
+    // A cópia nasce no nome de quem copiou (o usuario_id do
+    // INSERT abaixo é req.usuarioId), então editar a cópia é
+    // editar o que é seu.
     const { rows: originais } = await cliente.query(
       `SELECT titulo, descricao, categoria, icone,
               imagem_url, imagem_credito, imagem_pagina
          FROM quizzes
-        WHERE id = $1 AND usuario_id = $2`,
-      [id, req.usuarioId]
+        WHERE id = $1`,
+      [id]
     );
 
     if (originais.length === 0) {
@@ -506,7 +571,7 @@ router.post("/:id/copia", async (req, res, next) => {
  *
  * As perguntas e alternativas vão junto, pelo ON DELETE CASCADE.
  */
-router.delete("/:id", async (req, res, next) => {
+router.delete("/:id", exigirLogin, async (req, res, next) => {
   try {
     const id = lerId(req.params.id);
     if (id === null) return res.status(400).json({ erro: "Id inválido" });
@@ -539,7 +604,7 @@ router.delete("/:id", async (req, res, next) => {
  *
  * O preço é que isso só funciona dentro de uma TRANSAÇÃO.
  */
-router.put("/:id/perguntas", async (req, res, next) => {
+router.put("/:id/perguntas", exigirLogin, async (req, res, next) => {
   const id = lerId(req.params.id);
   if (id === null) return res.status(400).json({ erro: "Id inválido" });
 

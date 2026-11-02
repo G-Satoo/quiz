@@ -141,8 +141,21 @@ describe("GET /api/quizzes", () => {
     assert.equal(resposta.dados.quizzes[0].perguntas, 2);
   });
 
-  it("não mostra quiz de outra pessoa", async () => {
-    await criarQuiz();
+  it("abre para visitante, sem login", async () => {
+    // O catálogo é a primeira tela do site. Se ele exigisse
+    // sessão, a porta de entrada seria um formulário de login.
+    await criarQuiz("Aberto a todos");
+
+    cliente.esquecerCookie();
+    const resposta = await cliente.get("/api/quizzes");
+
+    assert.equal(resposta.status, 200);
+    assert.equal(resposta.dados.quizzes.length, 1);
+    assert.equal(resposta.dados.quizzes[0].titulo, "Aberto a todos");
+  });
+
+  it("mostra o quiz de outra pessoa, com o nome do autor", async () => {
+    await criarQuiz("De quem veio antes");
 
     cliente.esquecerCookie();
     await cliente.post("/api/usuarios", {
@@ -150,9 +163,95 @@ describe("GET /api/quizzes", () => {
       email: "outra@exemplo.com",
       senha: "uma-senha-boa"
     });
+    await criarQuiz("Meu");
 
-    const resposta = await cliente.get("/api/quizzes");
-    assert.equal(resposta.dados.quizzes.length, 0);
+    const { dados } = await cliente.get("/api/quizzes");
+    const porTitulo = Object.fromEntries(dados.quizzes.map((q) => [q.titulo, q]));
+
+    assert.equal(dados.quizzes.length, 2);
+    assert.equal(porTitulo["De quem veio antes"].autor, "Apresentador");
+    assert.equal(porTitulo["De quem veio antes"].meu, false);
+    assert.equal(porTitulo["Meu"].meu, true);
+  });
+
+  it("?meus=1 devolve só os seus", async () => {
+    await criarQuiz("Da outra pessoa");
+
+    cliente.esquecerCookie();
+    await cliente.post("/api/usuarios", {
+      nome: "Outra",
+      email: "outra@exemplo.com",
+      senha: "uma-senha-boa"
+    });
+    await criarQuiz("O meu");
+
+    const { dados } = await cliente.get("/api/quizzes?meus=1");
+
+    assert.deepEqual(dados.quizzes.map((q) => q.titulo), ["O meu"]);
+  });
+
+  it("?meus=1 sem sessão devolve vazio, e não o catálogo todo", async () => {
+    // Devolver tudo a quem pediu "só os meus" seria mentir sobre
+    // de quem são aquelas linhas.
+    await criarQuiz();
+
+    cliente.esquecerCookie();
+    const { dados } = await cliente.get("/api/quizzes?meus=1");
+
+    assert.deepEqual(dados.quizzes, []);
+  });
+});
+
+describe("GET /api/quizzes/:id", () => {
+  it("o dono recebe o gabarito", async () => {
+    const quiz = await criarQuiz();
+
+    const { dados } = await cliente.get(`/api/quizzes/${quiz.id}`);
+    const alternativas = dados.quiz.perguntas[0].alternativas;
+
+    assert.equal(dados.quiz.meu, true);
+    assert.ok(alternativas.some((a) => a.correta === true), "falta a correta");
+  });
+
+  it("visitante NÃO recebe o gabarito", async () => {
+    // Catálogo aberto não pode virar lista de respostas: bastaria
+    // abrir o DevTools antes de entrar na sala para jogar sabendo
+    // tudo.
+    const quiz = await criarQuiz();
+
+    cliente.esquecerCookie();
+    const { status, dados } = await cliente.get(`/api/quizzes/${quiz.id}`);
+
+    assert.equal(status, 200);
+    assert.equal(dados.quiz.titulo, "Geografia");
+
+    for (const p of dados.quiz.perguntas) {
+      for (const a of p.alternativas) {
+        // Ausente, não `false`: mandá-la falsa em todas seria uma
+        // afirmação errada.
+        assert.ok(!("correta" in a), "vazou o gabarito: " + JSON.stringify(a));
+      }
+    }
+  });
+
+  it("visitante não vê pergunta bloqueada", async () => {
+    const quiz = await criarQuiz();
+
+    await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
+      perguntas: [pergunta("Fica"), pergunta("Sai")]
+    });
+
+    const { dados: antes } = await cliente.get(`/api/quizzes/${quiz.id}`);
+    const alvo = antes.quiz.perguntas.find((p) => p.enunciado === "Sai");
+
+    await cliente.patch(`/api/quizzes/${quiz.id}/perguntas/${alvo.id}`, {
+      ativa: false
+    });
+
+    cliente.esquecerCookie();
+    const { dados } = await cliente.get(`/api/quizzes/${quiz.id}`);
+
+    assert.deepEqual(dados.quiz.perguntas.map((p) => p.enunciado), ["Fica"]);
   });
 });
 
@@ -510,18 +609,40 @@ describe("POST /api/quizzes/:id/copia", () => {
     assert.equal(dados.quiz.perguntas.length, 1);
   });
 
-  it("não copia quiz de outra pessoa", async () => {
-    const quiz = await criarQuiz();
+  it("copia o quiz de outra pessoa, e a cópia nasce no nome de quem copiou", async () => {
+    // É o que torna o catálogo público utilizável: quem gostou de
+    // um quiz alheio leva uma versão própria em vez de pedir
+    // permissão para mexer no original.
+    const quiz = await criarQuiz("Original de outra pessoa");
 
     cliente.esquecerCookie();
     await cliente.post("/api/usuarios", {
-      nome: "Outro",
-      email: "outro@exemplo.com",
+      nome: "Copiadora",
+      email: "copiadora@exemplo.com",
       senha: "uma-senha-boa"
     });
 
     const resposta = await cliente.post(`/api/quizzes/${quiz.id}/copia`);
-    assert.equal(resposta.status, 404);
+    assert.equal(resposta.status, 201);
+
+    // Nasceu no nome de quem copiou — então editar a cópia é
+    // editar o que é seu.
+    const { dados } = await cliente.get(`/api/quizzes/${resposta.dados.quiz.id}`);
+    assert.equal(dados.quiz.autor, "Copiadora");
+    assert.equal(dados.quiz.meu, true);
+
+    // E o original segue de pé, intocado.
+    const { dados: lista } = await cliente.get("/api/quizzes");
+    assert.ok(lista.quizzes.some((q) => q.titulo === "Original de outra pessoa"));
+  });
+
+  it("exige login para copiar", async () => {
+    const quiz = await criarQuiz();
+
+    cliente.esquecerCookie();
+    const resposta = await cliente.post(`/api/quizzes/${quiz.id}/copia`);
+
+    assert.equal(resposta.status, 401);
   });
 });
 

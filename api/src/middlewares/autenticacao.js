@@ -27,3 +27,25 @@ export async function exigirLogin(req, res, next) {
     next(erro);
   }
 }
+
+/**
+ * Descobre quem é, sem exigir que seja alguém.
+ *
+ * Existe para o catálogo público: a lista de quizzes abre para
+ * visitante, mas quando há sessão a resposta pode dizer o que é
+ * seu e o que não é. Sem isto, a rota teria que escolher entre
+ * ser pública e conhecer o usuário.
+ *
+ * Nunca responde 401: sessão ausente, expirada ou corrompida
+ * leva ao mesmo lugar — segue sem usuário. Quem precisa de dono
+ * usa exigirLogin; quem só quer saber, usa este.
+ */
+export async function loginOpcional(req, res, next) {
+  try {
+    const token = req.cookies?.[NOME_COOKIE];
+    req.usuarioId = (await lerSessao(token)) || null;
+    next();
+  } catch (erro) {
+    next(erro);
+  }
+}

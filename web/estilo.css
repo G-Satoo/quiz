@@ -174,7 +174,9 @@ button.discreto:hover { color: var(--texto); border-color: var(--texto-fraco); f
 
 .topo {
   display: flex;
-  justify-content: space-between;
+  /* A marca empurra o resto para a direita. Com space-between e
+     tres filhos, as acoes caiam no meio da barra. */
+  justify-content: flex-start;
   align-items: center;
   gap: 16px;
   padding: 14px 20px;
@@ -182,7 +184,7 @@ button.discreto:hover { color: var(--texto); border-color: var(--texto-fraco); f
   background: var(--superficie);
 }
 
-.marca { font-weight: 700; letter-spacing: -0.02em; }
+.marca { font-weight: 700; letter-spacing: -0.02em; margin-right: auto; text-decoration: none; color: var(--texto); }
 .marca span { color: var(--destaque); }
 
 /* No celular, o código digitado merece o mesmo destaque. */
@@ -1053,3 +1055,75 @@ input:disabled, select:disabled {
 }
 
 button.bloqueada { border-color: rgba(242, 163, 60, 0.5); color: var(--alerta); }
+
+/* ============================================================
+   As duas portas do site
+   ============================================================ */
+
+.acoes-topo { display: flex; align-items: center; gap: 10px; }
+
+/* O código de sala é a porta ESTREITA: quem tem um código já
+   sabe para onde vai. Fica visível e secundário — contorno, não
+   preenchimento, para não disputar atenção com o catálogo, que é
+   a porta larga. */
+.botao-codigo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 15px;
+  border: 1px solid var(--borda);
+  border-radius: 999px;
+  background: var(--fundo);
+  color: var(--texto);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.botao-codigo:hover { border-color: var(--destaque); color: var(--destaque); }
+
+/* Pontinho pulsando: sugere "tem gente jogando agora", que é
+   exatamente o que uma sala por código é. */
+.ponto-vivo {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--sucesso);
+  animation: pulsar 2s ease-in-out infinite;
+}
+
+@keyframes pulsar {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* Quem desliga animação no sistema não quer um ponto piscando no
+   canto da tela pelo tempo que a aba ficar aberta. */
+@media (prefers-reduced-motion: reduce) {
+  .ponto-vivo { animation: none; }
+}
+
+.area-conta { display: flex; align-items: center; gap: 10px; }
+
+.nome-conta {
+  font-size: 13px;
+  color: var(--texto-fraco);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Autor no cartão: passou a importar quando o catálogo deixou de
+   ser a sua própria lista. */
+.autor-card { color: var(--texto-fraco); }
+
+/* No celular a barra não cabe inteira: o nome da conta sai e
+   sobram as duas portas, que são o que a barra existe para dar. */
+@media (max-width: 520px) {
+  .nome-conta { display: none; }
+  .topo { padding: 12px 14px; gap: 10px; }
+  .botao-codigo { padding: 7px 12px; }
+}
