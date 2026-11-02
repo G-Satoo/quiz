@@ -200,7 +200,14 @@ export async function responder(codigo, jogadorId, alternativaId) {
 export async function fecharPergunta(codigo) {
   cancelarCronometro(codigo);
 
-  const { indice } = await salas.lerPerguntaAberta(codigo);
+  const { fase, indice } = await salas.lerPerguntaAberta(codigo);
+
+  // Só quem reservar o fechamento continua; os outros caminhos
+  // que tentaram fechar ao mesmo tempo param aqui, sem somar
+  // ponto nenhum. Ver salas.reservarFechamento.
+  if (fase !== "pergunta") return null;
+  if (!(await salas.reservarFechamento(codigo, indice))) return null;
+
   const perguntas = await salas.lerPerguntas(codigo);
   const pergunta = perguntas?.[indice];
 
@@ -264,4 +271,71 @@ export async function contarRespostas(codigo) {
 
 export function esquecerCronometro(codigo) {
   cancelarCronometro(codigo);
+}
+
+/**
+ * Grava o placar final no Postgres.
+ *
+ * O placar mora no Redis e some com a sala. O ranking do dia e a
+ * avaliação do quiz precisam dele depois disso, então no fim da
+ * partida ele vira linha de tabela.
+ *
+ * Um INSERT só, com o placar inteiro passando como JSON: com 30
+ * jogadores, um INSERT por pessoa seriam 30 idas ao banco no
+ * momento exato em que a sala inteira espera a tela final.
+ *
+ * ON CONFLICT DO NOTHING: se o fim for processado duas vezes, a
+ * segunda não duplica ninguém.
+ */
+export async function gravarResultados(codigo, quizId, placar, contas = {}) {
+  if (placar.length === 0) return;
+
+  const linhas = placar.map((jogador, i) => ({
+    id: jogador.id,
+    apelido: jogador.apelido,
+    pontos: jogador.pontos,
+    posicao: i + 1,
+    // null para quem jogou sem conta: joga, mas não entra no
+    // ranking do dia.
+    usuario_id: contas[jogador.id] ?? null
+  }));
+
+  await pool.query(
+    `INSERT INTO resultados (quiz_id, sala, jogador_id, apelido, pontos, posicao, usuario_id)
+     SELECT $1, $2, x.id, x.apelido, x.pontos, x.posicao, x.usuario_id
+       FROM jsonb_to_recordset($3::jsonb)
+         AS x(id text, apelido text, pontos int, posicao int, usuario_id int)
+     ON CONFLICT (sala, jogador_id) DO NOTHING`,
+    [quizId, codigo, JSON.stringify(linhas)]
+  );
+}
+
+/**
+ * O jogador dá nota ao quiz que acabou de jogar.
+ *
+ * O quiz não vem do cliente: sai da linha de resultado desta
+ * pessoa nesta sala. Assim não há como mandar nota para um quiz
+ * que não se jogou — e se a linha não existe (a partida ainda não
+ * terminou, ou o id é de outra sala), o INSERT não insere nada.
+ *
+ * Votar de novo troca a nota em vez de somar outra.
+ */
+export async function avaliar(codigo, jogadorId, nota) {
+  if (!Number.isInteger(nota) || nota < 1 || nota > 5) {
+    return { aceita: false, motivo: "nota-invalida" };
+  }
+
+  const { rows } = await pool.query(
+    `INSERT INTO avaliacoes (quiz_id, sala, jogador_id, nota)
+     SELECT quiz_id, sala, jogador_id, $3
+       FROM resultados
+      WHERE sala = $1 AND jogador_id = $2
+     ON CONFLICT (sala, jogador_id)
+       DO UPDATE SET nota = EXCLUDED.nota, avaliado_em = now()
+     RETURNING nota`,
+    [codigo, jogadorId, nota]
+  );
+
+  if (rows.length === 0) return { aceita: false, motivo: "partida-nao-terminou" };
+  return { aceita: true, nota: rows[0].nota };
 }

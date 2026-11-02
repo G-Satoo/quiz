@@ -9,7 +9,8 @@
     "migrar": "node db/migrar.js",
     "semear": "node scripts/semear.js",
     "test": "node --test tests/*.test.js",
-    "test:integracao": "node --test --test-concurrency=1 tests/integracao/*.test.js"
+    "test:integracao": "node --test --test-concurrency=1 tests/integracao/*.test.js",
+    "semear:catalogo": "node scripts/semear-catalogo.js"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",

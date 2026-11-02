@@ -393,3 +393,166 @@ describe("avançar e terminar", () => {
     assert.equal(fim.placar[0].apelido, "Ana");
   });
 });
+
+/** Joga as duas perguntas com todos respondendo a primeira alternativa. */
+async function jogarAteOFim(host, jogadores) {
+  for (let i = 0; i < 2; i++) {
+    host.enviar(i === 0 ? { tipo: "comecar" } : { tipo: "proxima" });
+
+    for (const jogador of jogadores) {
+      const pergunta = await jogador.esperar("pergunta");
+      jogador.enviar({ tipo: "responder", alternativaId: pergunta.alternativas[0].id });
+    }
+
+    await host.esperar("resultado");
+  }
+
+  host.enviar({ tipo: "proxima" });
+  for (const jogador of jogadores) await jogador.esperar("fim");
+  return host.esperar("fim");
+}
+
+describe("depois do fim: ranking e avaliação", () => {
+  it("jogador sem conta joga, mas não entra no ranking do dia", async () => {
+    // Sem conta, "Ana" é só um apelido: somar todos os "Ana" do
+    // dia juntaria pessoas diferentes.
+    const { codigo, host } = await prepararPartida();
+    const ana = await entrarJogador(codigo, "Ana");
+
+    await jogarAteOFim(host, [ana]);
+
+    cliente.esquecerCookie();
+    const { status, dados } = await cliente.get("/api/ranking/hoje");
+
+    assert.equal(status, 200);
+    assert.deepEqual(dados.jogadores, []);
+  });
+
+  it("jogador com conta entra no ranking, com os pontos do dia somados", async () => {
+    const hostCookie = cliente.cookieAtual;
+
+    // A conta do jogador. Cadastrar já loga — guardamos o cookie
+    // dele e devolvemos o do apresentador ao cliente HTTP.
+    await cliente.post("/api/usuarios", {
+      nome: "Beatriz",
+      email: "bia@exemplo.com",
+      senha: "uma-senha-boa"
+    });
+    const biaCookie = cliente.cookieAtual;
+    cliente.definirCookie(hostCookie);
+
+    let total = 0;
+
+    for (let partida = 0; partida < 2; partida++) {
+      const { codigo, host } = await prepararPartida();
+
+      const conexao = await abrir({ cookie: biaCookie });
+      conexao.enviar({ tipo: "entrar", codigo, apelido: partida === 0 ? "Bia" : "biazinha" });
+      await conexao.esperar("bem-vindo");
+
+      const fim = await jogarAteOFim(host, [conexao]);
+      total += fim.placar[0].pontos;
+    }
+
+    cliente.esquecerCookie();
+    const { dados } = await cliente.get("/api/ranking/hoje");
+
+    assert.equal(dados.jogadores.length, 1);
+    // O nome é o da conta, não o apelido de nenhuma das partidas.
+    assert.equal(dados.jogadores[0].nome, "Beatriz");
+    assert.equal(dados.jogadores[0].partidas, 2);
+    assert.equal(dados.jogadores[0].pontos, total);
+
+    // E o perfil dela enxerga as mesmas partidas.
+    cliente.definirCookie(biaCookie);
+    const { dados: perfil } = await cliente.get("/api/usuarios/eu/perfil");
+    assert.equal(perfil.perfil.partidas, 2);
+    assert.equal(perfil.perfil.pontos, total);
+  });
+
+  it("o jogador avalia depois do fim, e a nota entra na média do quiz", async () => {
+    const { codigo, host } = await prepararPartida();
+    const ana = await entrarJogador(codigo, "Ana");
+    const bia = await entrarJogador(codigo, "Bia");
+
+    await jogarAteOFim(host, [ana, bia]);
+
+    ana.enviar({ tipo: "avaliar", nota: 5 });
+    await ana.esperar("avaliacao-recebida");
+    bia.enviar({ tipo: "avaliar", nota: 4 });
+    await bia.esperar("avaliacao-recebida");
+
+    const { dados } = await cliente.get("/api/quizzes");
+    assert.equal(dados.quizzes[0].nota, 4.5);
+    assert.equal(dados.quizzes[0].avaliacoes, 2);
+  });
+
+  it("votar de novo troca a nota, não soma outra", async () => {
+    const { codigo, host } = await prepararPartida();
+    const ana = await entrarJogador(codigo, "Ana");
+
+    await jogarAteOFim(host, [ana]);
+
+    ana.enviar({ tipo: "avaliar", nota: 2 });
+    await ana.esperar("avaliacao-recebida");
+    ana.enviar({ tipo: "avaliar", nota: 5 });
+    await ana.esperar("avaliacao-recebida");
+
+    const { dados } = await cliente.get("/api/quizzes");
+    assert.equal(dados.quizzes[0].nota, 5);
+    assert.equal(dados.quizzes[0].avaliacoes, 1);
+  });
+
+  it("recusa avaliar antes de a partida terminar", async () => {
+    // Nota de quem não jogou até o fim seria o jeito mais barato
+    // de inflar ou afundar um quiz.
+    const { codigo } = await prepararPartida();
+    const ana = await entrarJogador(codigo, "Ana");
+
+    ana.enviar({ tipo: "avaliar", nota: 1 });
+    const erro = await ana.esperar("erro");
+
+    assert.equal(erro.codigo, "partida-nao-terminou");
+  });
+
+  it("recusa nota fora de 1 a 5", async () => {
+    const { codigo, host } = await prepararPartida();
+    const ana = await entrarJogador(codigo, "Ana");
+
+    await jogarAteOFim(host, [ana]);
+
+    ana.enviar({ tipo: "avaliar", nota: 10 });
+    const erro = await ana.esperar("erro");
+
+    assert.equal(erro.codigo, "nota-invalida");
+  });
+});
+
+describe("fechamento da pergunta", () => {
+  it("duas respostas simultâneas não fecham a pergunta duas vezes", async () => {
+    // Era um bug: as duas últimas respostas viam "todo mundo
+    // respondeu" e fechavam a pergunta cada uma — a sala recebia
+    // dois resultados e quem acertou ganhava os pontos em dobro.
+    const { codigo, host } = await prepararPartida();
+    const ana = await entrarJogador(codigo, "Ana");
+    const bia = await entrarJogador(codigo, "Bia");
+
+    host.enviar({ tipo: "comecar" });
+    const pergunta = await ana.esperar("pergunta");
+    await bia.esperar("pergunta");
+
+    // As duas no mesmo tique.
+    ana.enviar({ tipo: "responder", alternativaId: pergunta.alternativas[0].id });
+    bia.enviar({ tipo: "responder", alternativaId: pergunta.alternativas[0].id });
+
+    const resultado = await host.esperar("resultado");
+
+    // Nenhum segundo resultado deve chegar.
+    await assert.rejects(host.esperar("resultado", 800));
+
+    // E os pontos são de UM acerto: no máximo 1000.
+    for (const linha of resultado.placar) {
+      assert.ok(linha.pontos <= 1000, `${linha.apelido} ficou com ${linha.pontos}`);
+    }
+  });
+});

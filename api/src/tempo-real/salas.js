@@ -170,7 +170,12 @@ export async function mudarFase(codigo, fase) {
 
 /** Apaga a sala e tudo dela. Usado quando o apresentador encerra. */
 export async function encerrar(codigo) {
-  await redis.del(chaveSala(codigo), chaveJogadores(codigo), chaveOnline(codigo));
+  await redis.del(
+    chaveSala(codigo),
+    chaveJogadores(codigo),
+    chaveOnline(codigo),
+    chaveContas(codigo)
+  );
 }
 
 // ============================================================
@@ -185,6 +190,26 @@ export async function encerrar(codigo) {
 const chavePerguntas = (codigo) => `sala:${codigo}:perguntas`;
 const chaveRespostas = (codigo, indice) => `sala:${codigo}:respostas:${indice}`;
 const chavePontos = (codigo) => `sala:${codigo}:pontos`;
+const chaveContas = (codigo) => `sala:${codigo}:contas`;
+
+/**
+ * Anota que este jogador da sala é esta conta.
+ *
+ * Fica separado da lista de jogadores de propósito: a lista vai
+ * para o telão e para todo mundo na sala, e o id da conta de
+ * alguém não é da conta dos outros. Este hash só é lido no fim,
+ * para gravar o resultado.
+ */
+export async function vincularConta(codigo, jogadorId, usuarioId) {
+  await redis.hset(chaveContas(codigo), jogadorId, String(usuarioId));
+  await redis.expire(chaveContas(codigo), VALIDADE_SEGUNDOS);
+}
+
+/** jogadorId -> usuarioId, só de quem entrou logado. */
+export async function lerContas(codigo) {
+  const bruto = await redis.hgetall(chaveContas(codigo));
+  return Object.fromEntries(Object.entries(bruto).map(([j, u]) => [j, Number(u)]));
+}
 
 /**
  * Guarda as perguntas do quiz na sala.
@@ -245,6 +270,32 @@ export async function registrarResposta(codigo, indice, jogadorId, resposta) {
   await redis.expire(chaveRespostas(codigo, indice), VALIDADE_SEGUNDOS);
 
   return gravou === 1;
+}
+
+/**
+ * Reserva o direito de fechar a pergunta. Só o primeiro ganha.
+ *
+ * Fechar uma pergunta soma os pontos, e ela pode ser fechada por
+ * três caminhos ao mesmo tempo: o cronômetro, o apresentador
+ * clicando em "próxima" e a última resposta chegando. Com duas
+ * pessoas respondendo no mesmo instante, as DUAS viam "todo mundo
+ * respondeu" e as duas fechavam — e quem acertou ganhava os
+ * pontos em dobro.
+ *
+ * SET NX é o mesmo raciocínio do HSETNX das respostas: a decisão
+ * de quem chegou primeiro é atômica no Redis. Um "if fase ===
+ * 'pergunta'" no JavaScript seria atravessado pelas duas
+ * mensagens, que leriam a fase antes de qualquer uma mudá-la.
+ */
+export async function reservarFechamento(codigo, indice) {
+  const reservou = await redis.set(
+    `sala:${codigo}:fechou:${indice}`,
+    "1",
+    "EX",
+    VALIDADE_SEGUNDOS,
+    "NX"
+  );
+  return reservou === "OK";
 }
 
 export async function lerRespostas(codigo, indice) {

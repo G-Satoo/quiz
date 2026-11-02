@@ -84,6 +84,10 @@ router.get("/", async (req, res, next) => {
                  FROM aberturas a WHERE a.quiz_id = q.id)::int AS acessos_semana,
               (SELECT COUNT(*) FILTER (WHERE a.ocorrido_em >= date_trunc('day', now()))
                  FROM aberturas a WHERE a.quiz_id = q.id)::int AS acessos_hoje,
+              (SELECT ROUND(AVG(v.nota), 1)::float FROM avaliacoes v
+                WHERE v.quiz_id = q.id) AS nota,
+              (SELECT COUNT(*) FROM avaliacoes v
+                WHERE v.quiz_id = q.id)::int AS avaliacoes,
               u.nome AS autor,
               (q.usuario_id = $1) AS meu
          FROM quizzes q
@@ -122,6 +126,10 @@ router.get("/:id", async (req, res, next) => {
       `SELECT q.id, q.titulo, q.descricao, q.categoria, q.criado_em,
               q.partidas, q.icone,
               q.imagem_url, q.imagem_credito, q.imagem_pagina,
+              (SELECT ROUND(AVG(v.nota), 1)::float FROM avaliacoes v
+                WHERE v.quiz_id = q.id) AS nota,
+              (SELECT COUNT(*) FROM avaliacoes v
+                WHERE v.quiz_id = q.id)::int AS avaliacoes,
               u.nome AS autor,
               (q.usuario_id = $2) AS meu
          FROM quizzes q

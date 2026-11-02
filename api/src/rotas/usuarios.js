@@ -81,4 +81,38 @@ router.get("/eu", exigirLogin, async (req, res, next) => {
   }
 });
 
+/**
+ * GET /api/usuarios/eu/perfil
+ *
+ * O que a página de perfil mostra: a conta e o que ela já fez.
+ *
+ * Subconsultas em vez de JOINs: com dois JOINs (quizzes e
+ * resultados) cada quiz se multiplicaria por cada partida, e os
+ * COUNTs sairiam errados. Cada número aqui vem da sua tabela.
+ */
+router.get("/eu/perfil", exigirLogin, async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT u.id, u.nome, u.email, u.criado_em,
+              (SELECT COUNT(*) FROM quizzes q WHERE q.usuario_id = u.id)::int AS quizzes,
+              (SELECT COUNT(*) FROM resultados r WHERE r.usuario_id = u.id)::int AS partidas,
+              (SELECT COALESCE(SUM(r.pontos), 0) FROM resultados r WHERE r.usuario_id = u.id)::int AS pontos,
+              (SELECT COALESCE(MAX(r.pontos), 0) FROM resultados r WHERE r.usuario_id = u.id)::int AS recorde,
+              (SELECT COUNT(*) FROM resultados r
+                WHERE r.usuario_id = u.id AND r.posicao = 1)::int AS vitorias
+         FROM usuarios u
+        WHERE u.id = $1`,
+      [req.usuarioId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(401).json({ erro: "Faça login para continuar" });
+    }
+
+    res.json({ perfil: rows[0] });
+  } catch (erro) {
+    next(erro);
+  }
+});
+
 export default router;

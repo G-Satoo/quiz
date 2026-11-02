@@ -89,6 +89,18 @@
       <div class="cartao" style="text-align:center;margin-bottom:24px">
         <div class="veredito" id="colocacao"></div>
       </div>
+
+      <!--
+        Avaliar fica ANTES do placar: é o momento em que a pessoa
+        acabou de jogar e ainda está olhando para a tela. Depois
+        do placar ela já rolou, já fechou, já foi embora.
+      -->
+      <div class="cartao caixa-avaliar escondido" id="caixa-avaliar">
+        <div class="titulo-avaliar">O que você achou deste quiz?</div>
+        <div class="estrelas" id="estrelas" role="group" aria-label="Sua nota"></div>
+        <div class="retorno-avaliar" id="retorno-avaliar"></div>
+      </div>
+
       <ol class="placar" id="placar-final"></ol>
     </section>
   </div>
@@ -194,6 +206,13 @@ function tratar(mensagem) {
     if (["ja-respondeu", "tempo-esgotado", "nao-ha-pergunta-aberta"].includes(mensagem.codigo)) {
       return;
     }
+
+    // Recusa de avaliação também não derruba nada: aparece ao
+    // lado das estrelas, e a pessoa pode tentar de novo.
+    if (["nota-invalida", "partida-nao-terminou"].includes(mensagem.codigo)) {
+      $("retorno-avaliar").textContent = mensagem.mensagem;
+      return;
+    }
     sessionStorage.removeItem(GUARDADO);
     return mostrarErro(mensagem.mensagem);
   }
@@ -248,6 +267,13 @@ function tratar(mensagem) {
   }
   if (mensagem.tipo === "resultado") return mostrarResultado(mensagem);
   if (mensagem.tipo === "fim") return mostrarFim(mensagem);
+
+  if (mensagem.tipo === "avaliacao-recebida") {
+    desenharEstrelas(mensagem.nota);
+    $("retorno-avaliar").textContent =
+      `Obrigado! Você deu ${mensagem.nota} estrela${mensagem.nota === 1 ? "" : "s"}.`;
+    return;
+  }
 
   if (mensagem.tipo === "sala-encerrada") {
     pararCronometro();
@@ -379,6 +405,38 @@ function mostrarFim(mensagem) {
     posicao === -1 ? "Partida encerrada" : `${posicao + 1}º lugar`;
 
   desenharPlacar($("placar-final"), mensagem.placar);
+
+  // Só avalia quem está no placar — quem jogou. O servidor confere
+  // de novo (e o banco por cima dele); aqui é só para não oferecer
+  // estrelas que seriam recusadas.
+  $("caixa-avaliar").classList.toggle("escondido", posicao === -1);
+  $("retorno-avaliar").textContent = "";
+  desenharEstrelas(0);
+}
+
+/**
+ * Cinco botões de estrela. `escolhida` pinta até ela.
+ *
+ * Botões de verdade, e não spans com clique: assim dá para
+ * avaliar pelo teclado e o leitor de tela anuncia "3 estrelas".
+ */
+function desenharEstrelas(escolhida) {
+  const caixa = $("estrelas");
+  caixa.innerHTML = "";
+
+  for (let nota = 1; nota <= 5; nota++) {
+    const estrela = document.createElement("button");
+    estrela.type = "button";
+    estrela.className = "estrela" + (nota <= escolhida ? " acesa" : "");
+    estrela.textContent = "★";
+    estrela.setAttribute("aria-label", `${nota} estrela${nota === 1 ? "" : "s"}`);
+    estrela.setAttribute("aria-pressed", String(nota === escolhida));
+    estrela.addEventListener("click", () => {
+      $("retorno-avaliar").textContent = "Enviando…";
+      conexao.enviar({ tipo: "avaliar", nota });
+    });
+    caixa.append(estrela);
+  }
 }
 </script>
 </body>

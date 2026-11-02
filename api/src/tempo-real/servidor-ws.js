@@ -373,6 +373,8 @@ async function tratar(socket, mensagem) {
       return responder(socket, mensagem);
     case "proxima":
       return proxima(socket);
+    case "avaliar":
+      return avaliar(socket, mensagem);
     default:
       return recusar(socket, "tipo-desconhecido", "Não entendi essa mensagem");
   }
@@ -456,6 +458,12 @@ async function entrar(socket, { codigo: bruto, apelido, jogadorId: anterior }) {
   socket.papel = "jogador";
   socket.jogadorId = jogadorId;
   registrar(codigo, socket);
+
+  // Entrou logado? Os pontos desta partida passam a contar no
+  // ranking do dia. A identidade vem do cookie lido no handshake,
+  // nunca de algo que o cliente mande na mensagem — senão bastaria
+  // dizer "sou o usuário 7" para pontuar no nome dele.
+  if (socket.usuarioId) await salas.vincularConta(codigo, jogadorId, socket.usuarioId);
 
   const sala = await salas.ler(codigo);
 
@@ -610,7 +618,25 @@ async function abrirPerguntaDaSala(codigo, indice) {
   if (!aberta) {
     // Não há pergunta neste índice: a partida acabou.
     await salas.mudarFase(codigo, "encerrada");
-    transmitir(codigo, { tipo: "fim", placar: await salas.lerPlacar(codigo) });
+    const placar = await salas.lerPlacar(codigo);
+
+    // Grava ANTES de anunciar o fim: a tela final oferece as
+    // estrelas de avaliação, e a avaliação exige o resultado
+    // gravado. Na ordem inversa, quem clicasse rápido receberia
+    // "a partida não terminou" de uma partida que terminou.
+    //
+    // Se o banco falhar, a partida termina mesmo assim. Perder o
+    // ranking de uma partida é ruim; travar 30 pessoas numa tela
+    // sem fim é pior.
+    try {
+      const sala = await salas.ler(codigo);
+      const contas = await salas.lerContas(codigo);
+      await partida.gravarResultados(codigo, sala.quizId, placar, contas);
+    } catch (erro) {
+      console.error("Não consegui gravar o resultado da partida", codigo, erro);
+    }
+
+    transmitir(codigo, { tipo: "fim", placar });
   }
 }
 
@@ -673,4 +699,29 @@ async function proxima(socket) {
   }
 
   await abrirPerguntaDaSala(codigo, indice + 1);
+}
+
+/** Um jogador dá nota ao quiz, depois do fim da partida. */
+async function avaliar(socket, { nota }) {
+  if (socket.papel !== "jogador" || !socket.sala) {
+    return recusar(socket, "nao-autorizado", "Entre na sala primeiro");
+  }
+
+  const resultado = await partida.avaliar(socket.sala, socket.jogadorId, nota);
+
+  if (!resultado.aceita) {
+    const mensagens = {
+      "nota-invalida": "A nota vai de 1 a 5",
+      "partida-nao-terminou": "Dá para avaliar quando a partida terminar"
+    };
+
+    // Como as recusas de resposta: não derruba a conexão.
+    return enviar(socket, {
+      tipo: "erro",
+      codigo: resultado.motivo,
+      mensagem: mensagens[resultado.motivo] ?? "Avaliação recusada"
+    });
+  }
+
+  enviar(socket, { tipo: "avaliacao-recebida", nota: resultado.nota });
 }

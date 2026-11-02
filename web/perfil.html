@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Perfil — Quiz</title>
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+  <div class="topo">
+    <a class="marca" href="index.html">quiz<span>.</span></a>
+    <a href="index.html" style="font-size:13px">← Catálogo</a>
+  </div>
+
+  <div class="conteudo">
+    <div id="erro" class="erro escondido"></div>
+
+    <section id="perfil" class="escondido">
+      <div class="cabeca-perfil">
+        <span id="lugar-avatar"></span>
+        <div class="identidade-perfil">
+          <h1 id="nome"></h1>
+          <div class="subtitulo" id="email"></div>
+          <div class="desde-perfil" id="desde"></div>
+        </div>
+      </div>
+
+      <!--
+        Números do que a pessoa fez, não de quem ela é. São as
+        mesmas tabelas que alimentam o ranking: o perfil é o
+        ranking visto de dentro.
+      -->
+      <div class="numeros-perfil">
+        <div class="numero-perfil"><strong id="n-partidas">0</strong><span>partidas</span></div>
+        <div class="numero-perfil"><strong id="n-vitorias">0</strong><span>vitórias</span></div>
+        <div class="numero-perfil"><strong id="n-pontos">0</strong><span>pontos no total</span></div>
+        <div class="numero-perfil"><strong id="n-recorde">0</strong><span>recorde numa partida</span></div>
+        <div class="numero-perfil"><strong id="n-quizzes">0</strong><span>quizzes criados</span></div>
+      </div>
+
+      <div class="topo-secao-perfil">
+        <h2>Meus quizzes</h2>
+        <a href="editor.html"><button>+ Novo quiz</button></a>
+      </div>
+      <ul class="lista-meus" id="meus"></ul>
+      <div id="meus-vazio" class="vazio escondido">Você ainda não criou nenhum quiz.</div>
+
+      <!-- Sair mora aqui, e não no topo: é algo que se faz raramente. -->
+      <div class="rodape-perfil">
+        <button class="discreto" id="sair">Sair da conta</button>
+      </div>
+    </section>
+  </div>
+
+<script type="module">
+// ============================================================
+// Perfil
+//
+// Só existe para quem está logado. Sem sessão, volta para o
+// catálogo — que é público e tem o "Entrar".
+// ============================================================
+
+import { montarAvatar } from "./avatar.js";
+
+const $ = (id) => document.getElementById(id);
+
+async function pedir(metodo, caminho) {
+  const resposta = await fetch(caminho, { method: metodo });
+  const dados = resposta.headers.get("content-type")?.includes("json")
+    ? await resposta.json()
+    : null;
+
+  if (resposta.status === 401) {
+    location.href = "index.html";
+    throw new Error("sem sessão");
+  }
+  if (!resposta.ok) throw new Error(dados?.erro ?? "Erro inesperado");
+  return dados;
+}
+
+const numero = (n) => n.toLocaleString("pt-BR");
+
+try {
+  // As duas ao mesmo tempo: nenhuma depende da outra.
+  const [{ perfil }, { quizzes }] = await Promise.all([
+    pedir("GET", "/api/usuarios/eu/perfil"),
+    pedir("GET", "/api/quizzes?meus=1")
+  ]);
+
+  $("lugar-avatar").replaceWith(montarAvatar(perfil.nome, "avatar avatar-perfil"));
+  $("nome").textContent = perfil.nome;
+  $("email").textContent = perfil.email;
+  $("desde").textContent = "no quiz desde " +
+    new Date(perfil.criado_em).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+
+  $("n-partidas").textContent = numero(perfil.partidas);
+  $("n-vitorias").textContent = numero(perfil.vitorias);
+  $("n-pontos").textContent = numero(perfil.pontos);
+  $("n-recorde").textContent = numero(perfil.recorde);
+  $("n-quizzes").textContent = numero(perfil.quizzes);
+
+  const lista = $("meus");
+  $("meus-vazio").classList.toggle("escondido", quizzes.length > 0);
+
+  for (const quiz of quizzes) {
+    const item = document.createElement("li");
+
+    const link = document.createElement("a");
+    link.href = "editor.html?id=" + quiz.id;
+    link.textContent = quiz.titulo; // texto, nunca innerHTML
+
+    const meta = document.createElement("span");
+    meta.className = "meta-meus";
+    meta.textContent =
+      `${quiz.perguntas} pergunta${quiz.perguntas === 1 ? "" : "s"} · ${numero(quiz.partidas)} acessos` +
+      (quiz.avaliacoes > 0 ? ` · ★ ${quiz.nota.toFixed(1).replace(".", ",")}` : "");
+
+    item.append(link, meta);
+    lista.append(item);
+  }
+
+  $("perfil").classList.remove("escondido");
+} catch (erro) {
+  if (erro.message !== "sem sessão") {
+    $("erro").textContent = erro.message;
+    $("erro").classList.remove("escondido");
+  }
+}
+
+$("sair").addEventListener("click", async () => {
+  $("sair").disabled = true;
+  try {
+    await fetch("/api/sessoes", { method: "DELETE" });
+  } finally {
+    // Sessão já morta no servidor dá no mesmo: ninguém logado.
+    location.href = "index.html";
+  }
+});
+</script>
+</body>
+</html>
