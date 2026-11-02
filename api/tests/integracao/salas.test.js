@@ -69,9 +69,8 @@ async function abrir(opcoes) {
 
 /** Cria quiz com uma pergunta e abre uma sala para ele. */
 async function criarSala() {
-  const { dados: criado } = await cliente.post("/api/quizzes", { titulo: "Geografia" });
-
-  await cliente.put(`/api/quizzes/${criado.quiz.id}/perguntas`, {
+  const { dados: criado } = await cliente.post("/api/quizzes", {
+    titulo: "Geografia",
     perguntas: [
       {
         enunciado: "Capital do Brasil?",
@@ -97,14 +96,9 @@ describe("POST /api/salas", () => {
     assert.equal(sala.titulo, "Geografia");
   });
 
-  it("recusa abrir sala de quiz sem perguntas", async () => {
-    // 20 pessoas entrarem numa sala que termina na primeira tela é
-    // pior do que recusar aqui.
-    const { dados } = await cliente.post("/api/quizzes", { titulo: "Vazio" });
-
-    const resposta = await cliente.post("/api/salas", { quiz_id: dados.quiz.id });
-
-    assert.equal(resposta.status, 400);
+  it("recusa abrir sala de quiz que não existe", async () => {
+    const resposta = await cliente.post("/api/salas", { quiz_id: 999999 });
+    assert.equal(resposta.status, 404);
   });
 
   it("recusa abrir sala de quiz de outra pessoa", async () => {

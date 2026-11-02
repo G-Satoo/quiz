@@ -15,7 +15,14 @@ import { Router } from "express";
 import { redis } from "../redis.js";
 import { exigirLogin } from "../middlewares/autenticacao.js";
 import { limitar } from "../middlewares/limite.js";
-import { gerarPerguntas, conferirPergunta, ErroIA, DIFICULDADES } from "../servicos/ia.js";
+import {
+  gerarPerguntas,
+  conferirPergunta,
+  sugerirCapa,
+  ErroIA,
+  DIFICULDADES
+} from "../servicos/ia.js";
+import { buscarImagem } from "../servicos/imagem.js";
 import { lerInteiro } from "../util/validacao.js";
 
 const router = Router();
@@ -87,21 +94,42 @@ router.post(
         const guardado = await redis.get(chave);
 
         if (guardado) {
-          return res.json({ perguntas: JSON.parse(guardado), doCache: true });
+          const antigo = JSON.parse(guardado);
+
+          // O cache antigo guardava só a lista; o novo guarda
+          // { perguntas, icone }. Aceitar os dois evita jogar
+          // fora o que já foi gerado só porque o formato mudou.
+          const perguntas = Array.isArray(antigo) ? antigo : antigo.perguntas;
+          const icone = Array.isArray(antigo) ? null : antigo.icone;
+          const imagem = Array.isArray(antigo) ? null : (antigo.imagem ?? null);
+
+          return res.json({ perguntas, icone, imagem, doCache: true });
         }
       } catch {
         // Redis fora do ar não impede gerar — só deixa mais caro.
       }
 
-      const perguntas = await gerarPerguntas(pedido);
+      // Em paralelo: a capa não depende das perguntas, e
+      // esperar uma depois da outra dobraria o tempo que a
+      // pessoa fica olhando para o botão "Gerando...".
+      const [perguntas, capa] = await Promise.all([
+        gerarPerguntas(pedido),
+        sugerirCapa(pedido.tema)
+      ]);
+
+      // Só busca imagem se a IA indicou um termo. Ela deixa
+      // vazio quando o tema é obra protegida — e aí a capa fica
+      // com o emoji, que é a resposta honesta.
+      const imagem = capa.busca ? await buscarImagem(capa.busca) : null;
+      const icone = capa.icone;
 
       try {
-        await redis.set(chave, JSON.stringify(perguntas), "EX", VALIDADE_CACHE);
+        await redis.set(chave, JSON.stringify({ perguntas, icone, imagem }), "EX", VALIDADE_CACHE);
       } catch {
         // idem: não conseguir cachear não invalida o resultado.
       }
 
-      res.json({ perguntas, doCache: false });
+      res.json({ perguntas, icone, imagem, doCache: false });
     } catch (erro) {
       if (erro instanceof ErroIA) {
         // O detalhe técnico fica no log do servidor; para a tela

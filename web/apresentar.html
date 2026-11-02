@@ -31,17 +31,27 @@
       </div>
     </section>
 
-    <!-- 2. Escolher o quiz -->
+    <!-- 2. Catálogo -->
     <section id="tela-quizzes" class="escondido">
-      <div style="display:flex;align-items:center;gap:16px">
-        <div style="flex:1">
-          <h1>Seus quizzes</h1>
-          <p class="subtitulo">Escolha um para abrir a sala.</p>
+      <div id="erro-quizzes" class="erro escondido"></div>
+
+      <!-- Vitrine -->
+      <div class="destaque escondido" id="destaque"></div>
+
+      <!-- Fileiras por critério -->
+      <div id="fileiras"></div>
+
+      <!-- Tudo, com filtro por categoria -->
+      <div class="topo-catalogo">
+        <div>
+          <h2 class="titulo-secao-catalogo">Todos os quizzes</h2>
         </div>
         <a href="editor.html"><button>+ Novo quiz</button></a>
       </div>
-      <div id="erro-quizzes" class="erro escondido"></div>
-      <div id="lista-quizzes"></div>
+
+      <div class="filtros" id="filtros"></div>
+      <div class="catalogo" id="catalogo"></div>
+      <div id="catalogo-vazio" class="vazio escondido"></div>
     </section>
 
     <!-- 3. Sala de espera -->
@@ -51,6 +61,21 @@
         <div class="instrucao" style="margin:4px 0 18px"><strong id="endereco"></strong></div>
         <div style="color:var(--texto-fraco);font-size:14px">com o código</div>
         <div class="codigo-grande" id="codigo"></div>
+      </div>
+
+      <div class="barra-sala">
+        <!--
+          Editar abre em OUTRA ABA de propósito: sair desta
+          página derrubaria a conexão do apresentador, e a sala
+          com ela. Numa aba separada, o telão continua de pé com
+          o código visível enquanto você mexe nas perguntas.
+        -->
+        <a id="link-editar" href="editor.html" target="_blank" rel="noopener">
+          <button class="discreto">Editar perguntas</button>
+        </a>
+        <span class="nota-sala">
+          as mudanças valem a partir do momento em que a partida começar
+        </span>
       </div>
 
       <div style="display:flex;align-items:center;gap:16px;margin:24px 0 10px">
@@ -122,6 +147,7 @@
 // ============================================================
 
 import { criarConexao, pintarEstado } from "./conexao.js";
+import { artePorCategoria, coresDaCategoria } from "./capas.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -134,6 +160,7 @@ const mostrar = (nome) => {
 
 let conexao = null;
 let codigoSala = null;
+let quizDaSala = null;
 let cronometro = null;
 
 async function pedir(metodo, caminho, corpo) {
@@ -177,55 +204,446 @@ $("formulario-login").addEventListener("submit", async (evento) => {
   }
 });
 
+// ============================================================
+// Catálogo
+//
+// Vitrine no topo, fileiras por critério e a grade completa
+// embaixo — o formato de catálogo de leitura, onde o olho
+// percorre capas antes de ler nomes.
+//
+// Regra que vale mais que o layout: FILEIRA SÓ APARECE SE TIVER
+// CRITÉRIO REAL. Cada uma mede acessos num período, e quiz com
+// zero acesso não entra. Uma vitrine que inventa destaque
+// engana quem a lê — e, pior, engana quem a construiu, que
+// passa a confiar num número que não existe.
+//
+// Quiz não tem imagem de capa, e pedir upload seria atrito logo
+// na criação. A capa é DESENHADA a partir do título: mesmo
+// título, sempre as mesmas cores e iniciais. É original por
+// construção, custa zero e não levanta questão de direito de
+// imagem — que uma capa ilustrada de "Naruto" levantaria.
+// ============================================================
+
+const CATEGORIAS = {
+  geral: "Geral", anime: "Anime", games: "Games", filmes: "Filmes",
+  musica: "Música", esportes: "Esportes", historia: "História",
+  ciencia: "Ciência", tecnologia: "Tecnologia", educacao: "Educação"
+};
+
+// Poucos pares e bem distintos: com trinta variações tudo vira
+// ruído e nenhuma capa fica reconhecível.
+const CAPAS = [
+  ["#4ea3ff", "#1d4ed8"], ["#48c78e", "#0f766e"],
+  ["#f2a33c", "#b45309"], ["#ef5e64", "#9f1239"],
+  ["#a78bfa", "#6d28d9"], ["#22d3ee", "#0e7490"],
+  ["#f472b6", "#9d174d"], ["#facc15", "#a16207"]
+];
+
+/** Número estável a partir do texto — a capa não pode mudar a cada carregamento. */
+function semente(texto) {
+  let valor = 0;
+  for (const letra of texto) valor = (valor * 31 + letra.codePointAt(0)) % 100000;
+  return valor;
+}
+
+/**
+ * As cores da capa agora saem da CATEGORIA, não do título.
+ *
+ * Antes cada quiz tinha a sua cor própria, sorteada do nome.
+ * Ficava bonito e dizia nada: duas cores vizinhas não tinham
+ * relação nenhuma entre si. Vindo da categoria, a cor passa a
+ * ser informação — você aprende que roxo é games e laranja é
+ * música sem ler um rótulo.
+ */
+function coresDe(quiz) {
+  return coresDaCategoria(typeof quiz === "string" ? "geral" : quiz.categoria);
+}
+
+/** Até duas iniciais, para a capa não virar parede de texto. */
+function iniciais(titulo) {
+  const palavras = titulo.trim().split(/\s+/).filter((p) => p.length > 1);
+  if (palavras.length === 0) return titulo.slice(0, 2).toUpperCase();
+  return palavras.slice(0, 2).map((p) => p[0]).join("").toUpperCase();
+}
+
+let filtroAtual = null;
+let todosOsQuizzes = [];
+let idDestaque = null;
+
 async function carregarQuizzes() {
   mostrar("quizzes");
 
   try {
     const { quizzes } = await pedir("GET", "/api/quizzes");
-    const lista = $("lista-quizzes");
-    lista.innerHTML = "";
+    todosOsQuizzes = quizzes;
 
-    if (quizzes.length === 0) {
-      lista.innerHTML =
-        '<div class="vazio">Nenhum quiz ainda. Clique em <strong>+ Novo quiz</strong> para criar o primeiro.</div>';
-      return;
+    // Mantém o destaque escolhido se ele ainda existe; senão,
+    // elege o mais apresentado, e no empate o mais novo.
+    if (!todosOsQuizzes.some((q) => q.id === idDestaque)) {
+      idDestaque = eleitoParaDestaque()?.id ?? null;
     }
 
-    for (const quiz of quizzes) {
-      const cartao = document.createElement("div");
-      cartao.className = "cartao linha";
-
-      const texto = document.createElement("div");
-      texto.style.flex = "1";
-
-      const titulo = document.createElement("div");
-      titulo.style.fontWeight = "600";
-      titulo.textContent = quiz.titulo; // texto, nunca innerHTML
-
-      const detalhe = document.createElement("div");
-      detalhe.style.color = "var(--texto-fraco)";
-      detalhe.style.fontSize = "14px";
-      detalhe.textContent = `${quiz.perguntas} pergunta(s)`;
-
-      texto.append(titulo, detalhe);
-
-      const editar = document.createElement("a");
-      editar.href = `editor.html?id=${quiz.id}`;
-      editar.innerHTML = '<button class="discreto">Editar</button>';
-
-      const botao = document.createElement("button");
-      botao.textContent = "Abrir sala";
-      // Abrir sala de um quiz sem perguntas só geraria uma partida
-      // que termina na primeira tela.
-      botao.disabled = quiz.perguntas === 0;
-      botao.addEventListener("click", () => abrirSala(quiz.id, botao));
-
-      cartao.append(texto, editar, botao);
-      lista.append(cartao);
-    }
+    desenharDestaque();
+    desenharFileiras();
+    desenharFiltros();
+    desenharCatalogo();
   } catch (erro) {
     $("erro-quizzes").textContent = erro.message;
     $("erro-quizzes").classList.remove("escondido");
+  }
+}
+
+/**
+ * A vitrine mostra os MAIS ACESSADOS — não um por categoria.
+ *
+ * Empate em zero acesso (sistema novo, ninguém apresentou nada
+ * ainda) cai no mais recente, para a vitrine não nascer vazia.
+ */
+function maisAcessados() {
+  return [...todosOsQuizzes].sort(
+    (a, b) => b.partidas - a.partidas || new Date(b.criado_em) - new Date(a.criado_em)
+  );
+}
+
+function eleitoParaDestaque() {
+  return maisAcessados()[0];
+}
+
+// ---------- Vitrine ----------
+function desenharDestaque() {
+  const caixa = $("destaque");
+  const quiz = todosOsQuizzes.find((q) => q.id === idDestaque);
+
+  caixa.classList.toggle("escondido", !quiz);
+  if (!quiz) return;
+
+  caixa.innerHTML = "";
+
+  const [fundo, traco] = coresDe(quiz);
+
+  // O fundo repete as cores da capa, bem apagadas: amarra a
+  // vitrine ao item sem competir com o texto por cima.
+  caixa.style.background =
+    "radial-gradient(900px 420px at 18% 50%, " + traco + "26, transparent 70%), var(--superficie)";
+
+  const capa = document.createElement("div");
+  capa.className = "capa capa-destaque";
+  montarCapa(capa, quiz, true);
+
+  const texto = document.createElement("div");
+  texto.className = "texto-destaque";
+
+  const linha = document.createElement("div");
+  linha.className = "linha-meta";
+  linha.append(
+    marcador(CATEGORIAS[quiz.categoria] ?? quiz.categoria),
+    marcador(quiz.perguntas + " pergunta" + (quiz.perguntas === 1 ? "" : "s")),
+    marcador(quiz.partidas > 0 ? quiz.partidas + " acessos" : "ainda n\u00e3o acessado")
+  );
+
+  const titulo = document.createElement("h1");
+  titulo.className = "titulo-destaque";
+  titulo.textContent = quiz.titulo;
+
+  const descricao = document.createElement("p");
+  descricao.className = "descricao-destaque";
+  descricao.textContent = quiz.descricao || "Sem descrição.";
+
+  const acoes = document.createElement("div");
+  acoes.className = "acoes-destaque";
+
+  const jogar = document.createElement("button");
+  jogar.textContent = "Abrir sala";
+  jogar.disabled = quiz.perguntas === 0;
+  jogar.addEventListener("click", () => abrirSala(quiz.id, jogar));
+
+  acoes.append(jogar);
+  texto.append(linha, titulo, descricao, acoes);
+
+  // Miniaturas para trocar o destaque, como a vitrine de um
+  // catálogo. Só fazem sentido com mais de um quiz.
+  const miniaturas = document.createElement("div");
+  miniaturas.className = "miniaturas";
+
+  if (todosOsQuizzes.length > 1) {
+    // As miniaturas são o pódio: os seis mais acessados, na
+    // ordem. É a mesma régua da vitrine, então clicar nelas
+    // percorre o ranking em vez de uma lista arbitrária.
+    const ordenados = maisAcessados().slice(0, 6);
+
+    for (const outro of ordenados) {
+      const cores = coresDe(outro);
+
+      const mini = document.createElement("button");
+      mini.className = "miniatura" + (outro.id === quiz.id ? " ativa" : "");
+      mini.title = outro.titulo;
+
+      // A miniatura é a mesma arte da capa, reduzida — e não uma
+      // sigla. Ela serve para reconhecer qual capa está na
+      // vitrine, então precisa parecer com a capa.
+      mini.innerHTML = artePorCategoria(outro.categoria);
+      mini.addEventListener("click", () => {
+        idDestaque = outro.id;
+        desenharDestaque();
+      });
+
+      miniaturas.append(mini);
+    }
+  }
+
+  caixa.append(capa, texto, miniaturas);
+}
+
+function marcador(texto) {
+  const span = document.createElement("span");
+  span.className = "marcador";
+  span.textContent = texto;
+  return span;
+}
+
+// ---------- Fileiras ----------
+function desenharFileiras() {
+  const caixa = $("fileiras");
+  caixa.innerHTML = "";
+
+  const fileiras = [
+    {
+      titulo: "Mais acessados",
+      nota: "de todos os tempos",
+      lista: ordenarPor(todosOsQuizzes, "partidas")
+    },
+    {
+      titulo: "Mais acessados da semana",
+      nota: "últimos 7 dias",
+      lista: ordenarPor(todosOsQuizzes, "acessos_semana")
+    },
+    {
+      titulo: "Mais acessados hoje",
+      nota: "desde a meia-noite",
+      lista: ordenarPor(todosOsQuizzes, "acessos_hoje")
+    },
+    {
+      titulo: "Criados recentemente",
+      nota: "os últimos que você fez",
+      lista: [...todosOsQuizzes]
+        .sort((a, b) => new Date(b.criado_em) - new Date(a.criado_em))
+        .slice(0, 12)
+    }
+  ];
+
+  // Fileira sem dado não entra. "Mais acessados hoje" com uma
+  // lista de zeros não seria uma fileira vazia — seria uma
+  // fileira que mente, sugerindo acesso onde não houve nenhum.
+  for (const fileira of fileiras) {
+    if (fileira.lista.length > 0) caixa.append(desenharFileira(fileira));
+  }
+}
+
+/**
+ * Ordena pelo campo e descarta quem tem zero.
+ *
+ * Descartar é o ponto: uma fileira "mais acessados" que inclui
+ * quizzes com zero acesso, só para encher a linha, transforma a
+ * vitrine em decoração. Melhor ela aparecer com três itens — ou
+ * não aparecer.
+ */
+function ordenarPor(lista, campo) {
+  return lista
+    .filter((q) => (q[campo] ?? 0) > 0)
+    .sort((a, b) => b[campo] - a[campo])
+    .slice(0, 12);
+}
+
+/**
+ * Encurta o número de acessos para caber na caixinha.
+ *
+ * 1.200 vira "1,2 mil": numa etiqueta de trinta pixels, o
+ * número exato não cabe nem interessa — a ordem de grandeza é a
+ * informação. O valor cheio fica no `title`, para quem quiser.
+ */
+function formatarAcessos(total) {
+  if (!total) return "0";
+  if (total < 1000) return String(total);
+
+  const milhares = total / 1000;
+  return (milhares < 10 ? milhares.toFixed(1).replace(".", ",") : Math.round(milhares)) + " mil";
+}
+
+/** Desenha uma fileira: cabeçalho em duas linhas e o trilho. */
+function desenharFileira(fileira) {
+  const secao = document.createElement("section");
+  secao.className = "fileira";
+
+  const cabecalho = document.createElement("div");
+  cabecalho.className = "cabecalho-fileira";
+
+  const h2 = document.createElement("h2");
+  h2.className = "titulo-secao-catalogo";
+  h2.textContent = fileira.titulo;
+
+  // A nota diz de onde vem o critério. Uma fileira chamada
+  // "mais acessados" sem dizer o período é afirmação sem lastro.
+  const legenda = document.createElement("span");
+  legenda.className = "nota-fileira";
+  legenda.textContent = fileira.nota;
+
+  cabecalho.append(h2, legenda);
+
+  // Rolagem horizontal: a fileira mostra o começo e sugere que
+  // há mais, em vez de quebrar em linhas e virar outra grade.
+  const trilho = document.createElement("div");
+  trilho.className = "trilho";
+
+  for (const quiz of fileira.lista) trilho.append(desenharCartao(quiz, true));
+
+  secao.append(cabecalho, trilho);
+  return secao;
+}
+
+// ---------- Filtros e grade ----------
+function desenharFiltros() {
+  const filtros = $("filtros");
+  filtros.innerHTML = "";
+
+  // Só categorias que têm quiz: aba vazia é beco sem saída.
+  const presentes = [...new Set(todosOsQuizzes.map((q) => q.categoria))];
+  if (presentes.length <= 1) return;
+
+  const opcoes = [[null, "Tudo"]].concat(presentes.map((c) => [c, CATEGORIAS[c] ?? c]));
+
+  for (const [valor, rotulo] of opcoes) {
+    const botao = document.createElement("button");
+    botao.className = "filtro" + (filtroAtual === valor ? " ativo" : "");
+    botao.textContent = rotulo;
+    botao.addEventListener("click", () => {
+      filtroAtual = valor;
+      desenharFiltros();
+      desenharCatalogo();
+    });
+    filtros.append(botao);
+  }
+}
+
+function desenharCatalogo() {
+  const catalogo = $("catalogo");
+  catalogo.innerHTML = "";
+
+  const lista = filtroAtual
+    ? todosOsQuizzes.filter((q) => q.categoria === filtroAtual)
+    : todosOsQuizzes;
+
+  const vazio = $("catalogo-vazio");
+  vazio.classList.toggle("escondido", lista.length > 0);
+
+  if (lista.length === 0) {
+    vazio.innerHTML = todosOsQuizzes.length === 0
+      ? 'Nenhum quiz ainda. Clique em <strong>+ Novo quiz</strong> para criar o primeiro.'
+      : "Nenhum quiz nesta categoria.";
+    return;
+  }
+
+  for (const quiz of lista) catalogo.append(desenharCartao(quiz));
+}
+
+// ---------- Cartão ----------
+function desenharCartao(quiz, estreito) {
+  const cartao = document.createElement("article");
+  cartao.className = "card-quiz" + (estreito ? " estreito" : "");
+
+  const capa = document.createElement("div");
+  capa.className = "capa";
+  montarCapa(capa, quiz, false);
+
+  const selo = document.createElement("span");
+  selo.className = "selo-categoria";
+  selo.textContent = CATEGORIAS[quiz.categoria] ?? quiz.categoria;
+
+  // Contador no canto oposto ao selo: um de cada lado, para os
+  // dois serem lidos de relance sem se atrapalharem.
+  const contador = document.createElement("span");
+  contador.className = "selo-acessos";
+  contador.textContent = formatarAcessos(quiz.partidas);
+  contador.title = quiz.partidas + " vez(es) apresentado";
+
+  // Quiz sem pergunta não abre sala; dizer isso na capa evita o
+  // clique frustrado num botão desabilitado sem explicação.
+  const aviso = document.createElement("span");
+  aviso.className = "selo-aviso";
+  aviso.textContent = "sem perguntas";
+  if (quiz.perguntas > 0) aviso.classList.add("escondido");
+
+  const acoes = document.createElement("div");
+  acoes.className = "acoes-capa";
+
+  // Só "Abrir sala". Editar deixou de morar aqui: quem vai
+  // apresentar abre a sala primeiro e ajusta as perguntas lá
+  // dentro, com o código já no telão. Assim a ordem da tela
+  // acompanha a ordem do que a pessoa realmente faz.
+  const jogar = document.createElement("button");
+  jogar.textContent = quiz.perguntas === 0 ? "Sem perguntas" : "Abrir sala";
+  jogar.disabled = quiz.perguntas === 0;
+  jogar.addEventListener("click", () => abrirSala(quiz.id, jogar));
+
+  acoes.append(jogar);
+  capa.append(selo, contador, aviso, acoes);
+
+  const titulo = document.createElement("h3");
+  titulo.className = "titulo-card";
+  titulo.textContent = quiz.titulo; // texto, nunca innerHTML
+
+  // O número de acessos saiu daqui: ele agora mora na capa, no
+  // canto esquerdo. Embaixo fica só o tamanho do quiz.
+  const meta = document.createElement("div");
+  meta.className = "meta-card";
+  meta.textContent = quiz.perguntas + " pergunta" + (quiz.perguntas === 1 ? "" : "s");
+
+  cartao.append(capa, titulo, meta);
+
+  // Licença livre exige atribuir o autor. Crédito escondido não
+  // cumpre a licença — então ele aparece, pequeno, mas aparece.
+  if (quiz.imagem_credito) {
+    const credito = document.createElement("div");
+    credito.className = "credito-capa";
+    credito.textContent = quiz.imagem_credito;
+    cartao.append(credito);
+  }
+
+  return cartao;
+}
+
+/**
+ * Monta o miolo de uma capa. UMA imagem, nunca duas sobrepostas.
+ *
+ *   1. imagem própria do quiz, se a pessoa pôs uma
+ *   2. senão, o desenho da categoria
+ *
+ * O emoji do tema NÃO entra aqui. Ele já esteve: desenho ao
+ * fundo com emoji por cima virava duas figuras disputando o
+ * mesmo espaço, e nenhuma das duas lia bem. Agora ele aparece
+ * ao lado do título, pequeno — informa sem poluir.
+ */
+function montarCapa(capa, quiz, grande) {
+  if (quiz.imagem_url) {
+    // <img> e não background-image: assim o navegador trata como
+    // imagem de verdade — carrega sob demanda, e um endereço
+    // quebrado dispara onerror em vez de deixar um buraco.
+    const foto = document.createElement("img");
+    foto.className = "foto-capa";
+    foto.src = quiz.imagem_url;
+    foto.alt = "";
+    foto.loading = "lazy";
+
+    // Endereço de fora pode sumir a qualquer momento. Se sumir,
+    // cai no desenho da categoria em vez de mostrar o ícone de
+    // imagem quebrada.
+    foto.addEventListener("error", () => {
+      foto.remove();
+      capa.insertAdjacentHTML("afterbegin", artePorCategoria(quiz.categoria));
+    });
+
+    capa.append(foto);
+  } else {
+    capa.insertAdjacentHTML("beforeend", artePorCategoria(quiz.categoria));
   }
 }
 
@@ -234,6 +652,9 @@ async function abrirSala(quizId, botao) {
 
   try {
     const { sala } = await pedir("POST", "/api/salas", { quiz_id: quizId });
+
+    quizDaSala = quizId;
+    $("link-editar").href = "editor.html?id=" + quizId;
 
     codigoSala = sala.codigo;
     $("codigo").textContent = sala.codigo;

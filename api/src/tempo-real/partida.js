@@ -67,7 +67,7 @@ export async function carregarPerguntas(quizId) {
             a.texto, a.correta
        FROM perguntas p
        JOIN alternativas a ON a.pergunta_id = p.id
-      WHERE p.quiz_id = $1
+      WHERE p.quiz_id = $1 AND p.ativa
       ORDER BY p.ordem, a.ordem`,
     [quizId]
   );

@@ -281,6 +281,85 @@ export class ErroIA extends Error {
  * Nunca lança JSON cru para quem chamou: o que sai daqui ou é uma
  * lista válida pelas regras do projeto, ou é um ErroIA.
  */
+/**
+ * Escolhe, de uma vez, o emoji e o termo de busca da capa.
+ *
+ * Um pedido só para as duas coisas: são a mesma decisão ("como
+ * represento este tema visualmente?") e duas chamadas custariam
+ * o dobro de cota e de espera.
+ *
+ * O termo de busca sai em INGLÊS porque o acervo livre é
+ * indexado assim — pedir "bandeira do brasil" devolveu um
+ * terminal de ônibus chamado Bandeira; "Flag of Brazil" devolve
+ * a bandeira.
+ *
+ * E o modelo pode devolver termo vazio de propósito: para
+ * franquia protegida (anime, filme, game) não existe imagem
+ * livre, e uma busca só traria algo tangencial. Nesse caso a
+ * capa fica com o emoji, que é a resposta honesta.
+ *
+ * NUNCA derruba a geração: capa sem imagem é menos bonita; quiz
+ * sem perguntas é inútil.
+ */
+export async function sugerirCapa(tema) {
+  const provedor = process.env.IA_PROVEDOR || "falso";
+
+  if (provedor === "falso") return { icone: "\u2753", busca: "" };
+
+  try {
+    const chave = process.env.IA_CHAVE;
+    const modelo = process.env.IA_MODELO || "gemini-3.6-flash";
+    if (!chave) return { icone: null, busca: "" };
+
+    const pedido =
+      "Tema de um quiz: " + tema + "\n\n" +
+      "Devolva dois campos:\n" +
+      '- "icone": UM emoji que represente o tema. Prefira o simbolo mais ' +
+      "direto: para um pais, a bandeira; para um esporte, a bola.\n" +
+      '- "busca": um termo EM INGLES para procurar uma foto num acervo de ' +
+      "imagens de licenca livre (Wikimedia Commons), do objeto ou lugar " +
+      "principal do tema. Ex.: 'Flag of Brazil', 'Solar System planets'.\n" +
+      "  Deixe \"busca\" VAZIO se o tema for uma obra protegida por direito " +
+      "autoral (anime, filme, serie, jogo, personagem de ficcao) — nesses " +
+      "casos nao existe imagem livre e e melhor nao buscar.";
+
+    const resposta = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`,
+      {
+        method: "POST",
+        headers: { "x-goog-api-key": chave, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: pedido }] }],
+          generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: { icone: { type: "STRING" }, busca: { type: "STRING" } },
+              required: ["icone", "busca"]
+            }
+          }
+        })
+      }
+    );
+
+    if (!resposta.ok) return { icone: null, busca: "" };
+
+    const dados = await resposta.json();
+    const bruto = JSON.parse(dados?.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}");
+
+    // O modelo às vezes embrulha o emoji em aspas ou numa frase.
+    // Pegamos os símbolos e ignoramos o resto, em vez de recusar.
+    const simbolos = [...(bruto.icone ?? "")].filter((c) => c.codePointAt(0) > 0x2000);
+
+    return {
+      icone: simbolos.length > 0 ? simbolos.slice(0, 8).join("") : null,
+      busca: String(bruto.busca ?? "").trim().slice(0, 100)
+    };
+  } catch {
+    return { icone: null, busca: "" };
+  }
+}
+
 export async function gerarPerguntas({ tema, quantidade = 5, dificuldade = "medio" }) {
   const provedor = process.env.IA_PROVEDOR || "falso";
   const implementacao = IMPLEMENTACOES[provedor];

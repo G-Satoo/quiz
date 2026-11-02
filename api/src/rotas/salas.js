@@ -80,7 +80,8 @@ router.post(
       // Confere dono e conta as perguntas na mesma consulta.
       const { rows } = await pool.query(
         `SELECT q.id, q.titulo,
-                (SELECT COUNT(*) FROM perguntas p WHERE p.quiz_id = q.id)::int AS perguntas
+                (SELECT COUNT(*) FROM perguntas p
+                  WHERE p.quiz_id = q.id AND p.ativa)::int AS perguntas
            FROM quizzes q
           WHERE q.id = $1 AND q.usuario_id = $2`,
         [quizId, req.usuarioId]
@@ -96,6 +97,27 @@ router.post(
       if (rows[0].perguntas === 0) {
         return res.status(400).json({ erro: "Este quiz ainda não tem perguntas" });
       }
+
+      // Abrir uma sala é o evento que mede popularidade aqui.
+      // Não conta quantos jogaram — isso exige histórico, que é
+      // a fase 5 —, conta quantas vezes alguém decidiu
+      // apresentar este quiz. É o dado honesto disponível hoje.
+      //
+      // UPDATE direto, sem ler antes: incrementar lendo e
+      // escrevendo perderia contagem quando duas salas do mesmo
+      // quiz fossem abertas ao mesmo tempo.
+      // Duas escritas, cada uma com o seu papel: a linha em
+      // `aberturas` guarda QUANDO (e é o que permite cortar por
+      // semana ou por dia); o contador em `quizzes` guarda o
+      // total, que aparece em toda listagem e seria caro de
+      // somar a cada carregamento.
+      await pool.query(
+        `WITH registro AS (
+           INSERT INTO aberturas (quiz_id) VALUES ($1)
+         )
+         UPDATE quizzes SET partidas = partidas + 1 WHERE id = $1`,
+        [quizId]
+      );
 
       const codigo = await sortearCodigoLivre({
         quizId,

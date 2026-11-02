@@ -16,12 +16,47 @@
     <div id="erro" class="erro escondido"></div>
     <div id="aviso-salvo" class="aviso escondido">Salvo.</div>
 
+    <div id="aviso-travado" class="aviso-travado escondido">
+      <strong>Este quiz já foi apresentado.</strong>
+      As perguntas foram testadas com gente de verdade, então ficam como estão —
+      você pode <em>bloquear</em> uma que não queira mais usar, e isso vale na hora.
+      Para mudar o conteúdo, use <strong>Duplicar</strong>: a cópia é sua para editar
+      à vontade, e o original segue intacto com o histórico dele.
+    </div>
+
     <div class="cartao" style="margin-bottom:26px">
       <label for="titulo">Título do quiz</label>
       <input id="titulo" maxlength="140" placeholder="Ex.: Conhecimentos gerais" required>
 
-      <label for="descricao">Descrição (opcional)</label>
-      <input id="descricao" maxlength="300" placeholder="Uma linha sobre o tema">
+      <label for="imagem">Imagem de capa (opcional)</label>
+      <input id="imagem" maxlength="500" placeholder="Cole o endereço de uma imagem, ou deixe vazio">
+      <p class="dica-campo">
+        Vazio usa o desenho da categoria com o símbolo por cima. Se colar um
+        endereço, use imagem que você tenha direito de usar.
+      </p>
+
+      <div class="linha-formulario">
+        <div style="flex:2">
+          <label for="descricao">Descrição (opcional)</label>
+          <input id="descricao" maxlength="300" placeholder="Uma linha sobre o tema">
+        </div>
+
+        <div>
+          <label for="categoria">Categoria</label>
+          <select id="categoria">
+            <option value="geral">Geral</option>
+            <option value="anime">Anime</option>
+            <option value="games">Games</option>
+            <option value="filmes">Filmes</option>
+            <option value="musica">Música</option>
+            <option value="esportes">Esportes</option>
+            <option value="historia">História</option>
+            <option value="ciencia">Ciência</option>
+            <option value="tecnologia">Tecnologia</option>
+            <option value="educacao">Educação</option>
+          </select>
+        </div>
+      </div>
     </div>
 
     <div class="cartao gerador">
@@ -72,7 +107,7 @@
 
     <div class="rodape-editor">
       <button id="botao-salvar">Salvar quiz</button>
-      <button class="discreto" id="botao-apagar">Apagar quiz</button>
+      <button class="discreto escondido" id="botao-copiar">Duplicar</button>
     </div>
   </div>
 
@@ -104,6 +139,18 @@ let quizId = parametros.get("id") ? Number(parametros.get("id")) : null;
 /** O rascunho. É a fonte da verdade da tela. */
 let perguntas = [];
 
+/**
+ * Quiz já apresentado não se edita: só se bloqueia pergunta ou
+ * se duplica.
+ *
+ * A régua é ter sido apresentado, não ter sido criado. Um quiz
+ * recém-feito ainda é rascunho — travar nele só obrigaria a
+ * duplicar para corrigir um erro de digitação. A partir do
+ * momento em que ele rodou com público, as perguntas foram
+ * testadas, e mudá-las afeta toda apresentação futura.
+ */
+let travado = false;
+
 async function pedir(metodo, caminho, corpo) {
   const resposta = await fetch(caminho, {
     method: metodo,
@@ -129,10 +176,31 @@ function limparErro() {
   $("erro").classList.add("escondido");
 }
 
+/**
+ * Esconde tudo que mudaria o conteúdo e deixa só o que é
+ * permitido: bloquear pergunta e duplicar.
+ *
+ * Desabilitar em vez de esconder os campos é proposital — a
+ * pessoa precisa LER as perguntas para decidir qual bloquear.
+ * Escondê-las resolveria a trava e destruiria a utilidade.
+ */
+function aplicarTrava() {
+  $("aviso-travado").classList.remove("escondido");
+
+  for (const id of ["titulo", "descricao", "categoria", "imagem"]) {
+    $(id).disabled = true;
+  }
+
+  document.querySelector(".gerador").classList.add("escondido");
+  $("botao-adicionar").classList.add("escondido");
+  $("botao-salvar").classList.add("escondido");
+}
+
 function perguntaVazia() {
   return {
     enunciado: "",
     segundos: 20,
+    ativa: true,
     alternativas: [
       { texto: "", correta: true },
       { texto: "", correta: false }
@@ -147,10 +215,23 @@ if (quizId) {
 
     $("titulo").value = quiz.titulo;
     $("descricao").value = quiz.descricao ?? "";
+    $("categoria").value = quiz.categoria ?? "geral";
+    $("imagem").value = quiz.imagem_url ?? "";
 
+    // Quiz existente pode ser duplicado.
+    $("botao-copiar").classList.remove("escondido");
+
+    travado = (quiz.partidas ?? 0) > 0;
+    if (travado) aplicarTrava();
+
+    // O id vem junto: é por ele que o servidor sabe que esta é a
+    // MESMA pergunta, e não uma nova. Sem ele, cada salvamento
+    // criaria perguntas novas e desativaria as antigas.
     perguntas = quiz.perguntas.map((p) => ({
+      id: p.id,
       enunciado: p.enunciado,
       segundos: p.segundos,
+      ativa: p.ativa !== false,
       alternativas: p.alternativas.map((a) => ({ texto: a.texto, correta: a.correta }))
     }));
   } catch (erro) {
@@ -158,7 +239,7 @@ if (quizId) {
   }
 } else {
   perguntas = [perguntaVazia()];
-  $("botao-apagar").classList.add("escondido");
+  $("botao-copiar").classList.add("escondido");
 }
 
 desenhar();
@@ -183,15 +264,19 @@ function desenhar() {
     container.append(desenharPergunta(pergunta, indice));
   });
 
+  const ativas = perguntas.filter((p) => p.ativa !== false).length;
+  const desativadas = perguntas.length - ativas;
+
   $("contagem-perguntas").textContent =
-    `${perguntas.length} de 50 · mínimo 1`;
+    `${ativas} ativa${ativas === 1 ? "" : "s"} de 50` +
+    (desativadas > 0 ? ` · ${desativadas} desativada${desativadas === 1 ? "" : "s"}` : "");
 
   $("botao-adicionar").disabled = perguntas.length >= 50;
 }
 
 function desenharPergunta(pergunta, indice) {
   const cartao = document.createElement("div");
-  cartao.className = "cartao pergunta-editor";
+  cartao.className = "cartao pergunta-editor" + (pergunta.ativa === false ? " desativada" : "");
 
   // ----- Cabeçalho -----
   const cabecalho = document.createElement("div");
@@ -209,6 +294,7 @@ function desenharPergunta(pergunta, indice) {
   rotuloTempo.htmlFor = `segundos-${indice}`;
 
   const inputTempo = document.createElement("input");
+  inputTempo.disabled = travado;
   inputTempo.id = `segundos-${indice}`;
   inputTempo.type = "number";
   inputTempo.min = 5;
@@ -229,17 +315,65 @@ function desenharPergunta(pergunta, indice) {
   conferir.title = "Perguntar à IA qual é a correta, sem mostrar a sua marcação";
   conferir.addEventListener("click", () => conferirPergunta(pergunta, cartao, conferir));
 
-  const subir = botaoIcone("↑", indice === 0, () => mover(indice, -1));
-  const descer = botaoIcone("↓", indice === perguntas.length - 1, () => mover(indice, 1));
-  const remover = botaoIcone("✕", perguntas.length === 1, () => {
-    perguntas.splice(indice, 1);
-    desenhar();
-  });
+  const subir = botaoIcone("↑", travado || indice === 0, () => mover(indice, -1));
+  const descer = botaoIcone(
+    "↓",
+    travado || indice === perguntas.length - 1,
+    () => mover(indice, 1)
+  );
+  // Pergunta de quiz já salvo NÃO se apaga: bloqueia.
+  //
+  // Apagar é irreversível, e a pergunta é referenciada por
+  // histórico de partida. Quem está só experimentando o editor
+  // (pergunta ainda não salva, sem id) pode remover à vontade —
+  // ali não há nada para preservar.
+  const naoSalva = !Number.isInteger(pergunta.id);
 
-  cabecalho.append(numero, tempo, conferir, subir, descer, remover);
+  const alternar = document.createElement("button");
+
+  if (naoSalva) {
+    alternar.className = "discreto icone";
+    alternar.textContent = "✕";
+    alternar.title = "Remover esta pergunta (ainda não foi salva)";
+    alternar.disabled = perguntas.length === 1;
+    alternar.addEventListener("click", () => {
+      perguntas.splice(indice, 1);
+      desenhar();
+    });
+  } else if (travado) {
+    // No quiz travado o bloqueio é a única ação, então vale um
+    // botão com nome por extenso em vez de um símbolo. E ele
+    // grava na hora: sem botão de salvar, um efeito adiado
+    // simplesmente nunca aconteceria.
+    alternar.className = "discreto" + (pergunta.ativa ? "" : " bloqueada");
+    alternar.textContent = pergunta.ativa ? "Bloquear" : "Desbloquear";
+    alternar.addEventListener("click", () => bloquear(pergunta, alternar));
+  } else {
+    alternar.className = "discreto icone";
+    alternar.textContent = pergunta.ativa ? "⦸" : "↺";
+    alternar.title = pergunta.ativa
+      ? "Desativar: ela sai da partida mas continua guardada"
+      : "Reativar esta pergunta";
+    alternar.addEventListener("click", () => {
+      pergunta.ativa = !pergunta.ativa;
+      desenhar();
+    });
+  }
+
+  const remover = alternar;
+
+  if (pergunta.ativa === false) {
+    const aviso = document.createElement("span");
+    aviso.className = "selo-desativada";
+    aviso.textContent = "fora da partida";
+    cabecalho.append(numero, aviso, tempo, conferir, subir, descer, remover);
+  } else {
+    cabecalho.append(numero, tempo, conferir, subir, descer, remover);
+  }
 
   // ----- Enunciado -----
   const enunciado = document.createElement("input");
+  enunciado.disabled = travado;
   enunciado.placeholder = "Escreva a pergunta";
   enunciado.maxLength = 500;
   enunciado.value = pergunta.enunciado;
@@ -264,6 +398,7 @@ function desenharPergunta(pergunta, indice) {
     // garante que só uma fique marcada, que é a mesma regra que o
     // banco impõe com o índice único parcial.
     const marcador = document.createElement("input");
+    marcador.disabled = travado;
     marcador.type = "radio";
     marcador.name = `correta-${indice}`;
     marcador.checked = alternativa.correta;
@@ -285,6 +420,7 @@ function desenharPergunta(pergunta, indice) {
     letra.textContent = "ABCDEF"[posicao];
 
     const texto = document.createElement("input");
+    texto.disabled = travado;
     texto.placeholder = `Alternativa ${"ABCDEF"[posicao]}`;
     texto.maxLength = 200;
     texto.value = alternativa.texto;
@@ -312,7 +448,9 @@ function desenharPergunta(pergunta, indice) {
   const adicionarAlternativa = document.createElement("button");
   adicionarAlternativa.className = "discreto";
   adicionarAlternativa.textContent = "+ alternativa";
-  adicionarAlternativa.disabled = pergunta.alternativas.length >= LIMITE_ALTERNATIVAS;
+  adicionarAlternativa.disabled =
+    travado || pergunta.alternativas.length >= LIMITE_ALTERNATIVAS;
+  if (travado) adicionarAlternativa.classList.add("escondido");
   adicionarAlternativa.addEventListener("click", () => {
     pergunta.alternativas.push({ texto: "", correta: false });
     desenhar();
@@ -387,6 +525,36 @@ function pintarConferencia(cartao, resultado) {
   cartao.append(caixa);
 }
 
+/**
+ * Bloqueia ou desbloqueia a pergunta, gravando na hora.
+ *
+ * O servidor recusa bloquear a última ativa — um quiz sem
+ * pergunta abriria uma sala que termina na primeira tela. A tela
+ * só repassa a mensagem.
+ */
+async function bloquear(pergunta, botao) {
+  limparErro();
+
+  const novo = !pergunta.ativa;
+  botao.disabled = true;
+
+  try {
+    await pedir("PATCH", `/api/quizzes/${quizId}/perguntas/${pergunta.id}`, {
+      ativa: novo
+    });
+
+    pergunta.ativa = novo;
+    desenhar();
+
+    $("aviso-salvo").textContent = novo ? "Pergunta desbloqueada." : "Pergunta bloqueada.";
+    $("aviso-salvo").classList.remove("escondido");
+    setTimeout(() => $("aviso-salvo").classList.add("escondido"), 2500);
+  } catch (erro) {
+    mostrarErro(erro.message);
+    botao.disabled = false;
+  }
+}
+
 function botaoIcone(simbolo, desabilitado, aoClicar) {
   const botao = document.createElement("button");
   botao.className = "discreto icone";
@@ -435,7 +603,7 @@ $("botao-gerar").addEventListener("click", async () => {
   botao.textContent = "Gerando…";
 
   try {
-    const { perguntas: geradas, doCache } = await pedir("POST", "/api/geracao/perguntas", {
+    const { perguntas: geradas, imagem, doCache } = await pedir("POST", "/api/geracao/perguntas", {
       tema,
       quantidade: Number($("quantidade").value) || 5,
       dificuldade: $("dificuldade").value
@@ -454,6 +622,10 @@ $("botao-gerar").addEventListener("click", async () => {
     desenhar();
 
     if (!$("titulo").value.trim()) $("titulo").value = tema;
+
+    // Só preenche o símbolo se você ainda não escolheu um —
+    // sugestão não sobrescreve decisão.
+    if (imagem?.url && !$("imagem").value.trim()) $("imagem").value = imagem.url;
 
     $("aviso-salvo").textContent = doCache
       ? `${geradas.length} pergunta(s) reaproveitadas de uma geração anterior. Revise e salve.`
@@ -483,20 +655,29 @@ $("botao-salvar").addEventListener("click", async () => {
     // Sem o campo `conferencia`: ele é rascunho da tela, não
     // parte do quiz. Mandar junto só faria o servidor recusar.
     const paraEnviar = perguntas.map((p) => ({
+      id: p.id,
+      ativa: p.ativa !== false,
       enunciado: p.enunciado.trim(),
       segundos: p.segundos,
       alternativas: p.alternativas.map((a) => ({ texto: a.texto.trim(), correta: a.correta }))
     }));
 
+    const dados = {
+      titulo,
+      descricao: $("descricao").value.trim(),
+      categoria: $("categoria").value,
+      imagem: $("imagem").value.trim() ? { url: $("imagem").value.trim() } : undefined
+    };
+
     if (quizId) {
-      await pedir("PATCH", `/api/quizzes/${quizId}`, {
-        titulo,
-        descricao: $("descricao").value.trim()
-      });
+      await pedir("PATCH", `/api/quizzes/${quizId}`, dados);
     } else {
+      // Na criação, quiz e perguntas vão juntos. Criar vazio e
+      // preencher depois deixava um quiz órfão para trás sempre
+      // que a segunda requisição falhava.
       const { quiz } = await pedir("POST", "/api/quizzes", {
-        titulo,
-        descricao: $("descricao").value.trim()
+        ...dados,
+        perguntas: paraEnviar
       });
 
       quizId = quiz.id;
@@ -504,7 +685,13 @@ $("botao-salvar").addEventListener("click", async () => {
       // Troca a URL sem recarregar: a partir daqui a página edita
       // um quiz que existe, e recarregar não deve criar outro.
       history.replaceState(null, "", `editor.html?id=${quizId}`);
-      $("botao-apagar").classList.remove("escondido");
+      $("botao-copiar").classList.remove("escondido");
+
+      // Já foram no POST; não precisa mandar de novo.
+      $("aviso-salvo").textContent = "Quiz criado.";
+      $("aviso-salvo").classList.remove("escondido");
+      setTimeout(() => $("aviso-salvo").classList.add("escondido"), 2500);
+      return;
     }
 
     // A validação de verdade é do servidor — ele conhece as
@@ -521,16 +708,31 @@ $("botao-salvar").addEventListener("click", async () => {
   }
 });
 
-$("botao-apagar").addEventListener("click", async () => {
-  if (!confirm("Apagar este quiz? As perguntas vão junto.")) return;
+/**
+ * Duplicar: leva uma versão própria e mexe à vontade.
+ *
+ * Existe para não precisar proibir a edição de um quiz que já
+ * funciona. Um quiz apresentado dezenas de vezes teve as
+ * perguntas testadas com gente de verdade; deixar qualquer um
+ * editá-lo é deixar qualquer um estragá-lo, e o estrago cai
+ * sobre todas as apresentações futuras. Quem quer mudar copia.
+ */
+$("botao-copiar").addEventListener("click", async () => {
+  limparErro();
+  $("botao-copiar").disabled = true;
 
   try {
-    await pedir("DELETE", `/api/quizzes/${quizId}`);
-    location.href = "apresentar.html";
+    const { quiz } = await pedir("POST", `/api/quizzes/${quizId}/copia`);
+
+    // Vai direto para a cópia: quem clicou em duplicar quer
+    // editar a cópia, não continuar no original.
+    location.href = `editor.html?id=${quiz.id}`;
   } catch (erro) {
     mostrarErro(erro.message);
+    $("botao-copiar").disabled = false;
   }
 });
+
 </script>
 </body>
 </html>

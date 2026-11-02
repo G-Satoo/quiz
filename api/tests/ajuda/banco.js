@@ -44,7 +44,35 @@ async function esperarBanco(tentativas = 30) {
  */
 export async function prepararBanco() {
   await esperarBanco();
+  await esperarRedis();
   await migrar();
+}
+
+/**
+ * Confere que o Redis de teste responde, com prazo.
+ *
+ * Sem isto, o Redis parado NÃO dá erro: o ioredis tenta
+ * reconectar para sempre, e a suíte inteira fica pendurada em
+ * silêncio até alguém desistir. Já aconteceu três vezes neste
+ * projeto, sempre porque os containers do profile "teste" (que
+ * têm restart: "no", de propósito) morreram num reboot.
+ *
+ * Falhar em 5 segundos com a instrução de como subir vale mais
+ * do que esperar para sempre.
+ */
+async function esperarRedis(limiteMs = 5000) {
+  const prazo = new Promise((_, rejeitar) =>
+    setTimeout(() => rejeitar(new Error("tempo esgotado")), limiteMs)
+  );
+
+  try {
+    await Promise.race([redis.ping(), prazo]);
+  } catch {
+    throw new Error(
+      "Redis de teste não respondeu. Rode: " +
+      "docker compose --profile teste up -d db-teste redis-teste"
+    );
+  }
 }
 
 /**

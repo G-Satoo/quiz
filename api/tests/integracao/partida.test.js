@@ -66,9 +66,8 @@ async function abrir(opcoes) {
  * teste do tempo esgotado não demorar meio minuto.
  */
 async function prepararPartida() {
-  const { dados: criado } = await cliente.post("/api/quizzes", { titulo: "Geografia" });
-
-  await cliente.put(`/api/quizzes/${criado.quiz.id}/perguntas`, {
+  const { dados: criado } = await cliente.post("/api/quizzes", {
+    titulo: "Geografia",
     perguntas: [
       {
         enunciado: "Capital do Brasil?",

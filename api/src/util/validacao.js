@@ -93,6 +93,35 @@ export function validarNome(nome) {
   return null;
 }
 
+// As mesmas do CHECK da migração 003. Repetidas aqui de
+// propósito: o banco é a garantia final, mas quem erra merece
+// uma mensagem em português em vez de um erro de constraint.
+export const CATEGORIAS = [
+  "geral", "anime", "games", "filmes", "musica",
+  "esportes", "historia", "ciencia", "tecnologia", "educacao"
+];
+
+export function validarCategoria(categoria) {
+  if (categoria === undefined || categoria === null) return null; // o banco põe 'geral'
+  if (!CATEGORIAS.includes(categoria)) return "Categoria inválida";
+  return null;
+}
+
+/**
+ * O símbolo da capa.
+ *
+ * Não tentamos validar "é mesmo um emoji": a lista do Unicode
+ * cresce a cada ano, e uma regex de hoje recusaria o emoji de
+ * amanhã. Basta ser curto — o pior caso é uma capa com uma letra
+ * estranha, não um dado perigoso (a tela usa textContent).
+ */
+export function validarIcone(icone) {
+  if (icone === undefined || icone === null || icone === "") return null;
+  if (typeof icone !== "string") return "Símbolo inválido";
+  if ([...icone].length > 8) return "Use um símbolo só";
+  return null;
+}
+
 export function validarTitulo(titulo) {
   if (typeof titulo !== "string" || titulo.trim() === "") {
     return "Informe o título do quiz";
@@ -180,6 +209,13 @@ export function validarPerguntas(perguntas) {
     const erro = validarPergunta(pergunta, posicao);
     if (erro) return erro;
   }
+
+  // Desativadas continuam guardadas, mas não valem para a
+  // partida. Um quiz só com perguntas desativadas abriria uma
+  // sala que termina na primeira tela.
+  const ativas = perguntas.filter((p) => p.ativa !== false).length;
+
+  if (ativas === 0) return "Deixe pelo menos uma pergunta ativa";
 
   return null;
 }
