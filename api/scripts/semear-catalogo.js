@@ -33,6 +33,7 @@ import "dotenv/config";
 
 import { pool } from "../db/pool.js";
 import { gerarHash } from "../src/servicos/senha.js";
+import { pontosDoAcerto } from "../src/tempo-real/pontuacao.js";
 
 const EMAIL = "demo@quiz.dev";
 const SENHA = "demo12345";
@@ -735,10 +736,12 @@ async function semear() {
           // Dois em cada dez jogam sem conta: jogam, mas ficam
           // fora do ranking — como acontece de verdade.
           usuario_id: sortear() < 0.8 ? contas[quem] : null,
-          // 10 perguntas valem no máximo 10.000: 500 por acerto
-          // mais até 500 de velocidade. Ninguém acerta tudo no
-          // primeiro segundo, então o bônus sorteado fica abaixo.
-          pontos: acertos * 500 + entre(0, acertos * 380),
+          // A mesma conta da partida (pontuacao.js), para os
+          // números de demonstração caberem na escala real: cada
+          // acerto numa pergunta de 20 s, respondido num instante
+          // sorteado dentro do prazo.
+          pontos: Array.from({ length: acertos }, () => pontosDoAcerto(20, entre(1000, 18000)))
+            .reduce((a, b) => a + b, 0),
           posicao: 1,
           hoje,
           fracao: sortear()

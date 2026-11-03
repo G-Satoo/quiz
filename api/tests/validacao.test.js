@@ -8,7 +8,9 @@ import assert from "node:assert/strict";
 import {
   validarEmail,
   validarSenha,
-  lerInteiro
+  lerInteiro,
+  normalizarTexto,
+  validarPerguntas
 } from "../src/util/validacao.js";
 
 describe("validarEmail", () => {
@@ -68,5 +70,49 @@ describe("lerInteiro", () => {
     // ?dias=10&dias=20 chega como array no Express. Number([]) daria
     // NaN e, sem esta guarda, NaN passaria adiante silenciosamente.
     assert.equal(lerInteiro(["10", "20"], { padrao: 30, minimo: 1, maximo: 365 }), 30);
+  });
+});
+
+describe("normalizarTexto", () => {
+  it("iguala maiúsculas, acentos, pontuação e espaços", () => {
+    assert.equal(normalizarTexto("  Qual é a CAPITAL do Brasil?? "), "qual e a capital do brasil");
+    assert.equal(normalizarTexto("Pokémon: o nº 1"), "pokemon o n 1");
+  });
+
+  it("não iguala o que muda de sentido", () => {
+    assert.notEqual(normalizarTexto("Quantos planetas?"), normalizarTexto("Quantos satélites?"));
+  });
+});
+
+describe("validarPerguntas: repetição", () => {
+  const p = (enunciado, alternativas = ["Certa", "Errada"]) => ({
+    enunciado,
+    segundos: 20,
+    alternativas: alternativas.map((texto, i) => ({ texto, correta: i === 0 }))
+  });
+  const dez = Array.from({ length: 10 }, (_, i) => p(`Pergunta distinta ${i + 1}`));
+
+  it("recusa pergunta repetida e diz qual repete qual", () => {
+    assert.equal(
+      validarPerguntas([...dez, p("pergunta DISTINTA 2!")]),
+      "Pergunta 11 repete a pergunta 2"
+    );
+  });
+
+  it("aceita repetir o texto de uma pergunta desativada", () => {
+    // Reescrever uma pergunta aposentada e reativá-la depois é normal.
+    assert.equal(validarPerguntas([...dez, { ...p("Pergunta distinta 2"), ativa: false }]), null);
+  });
+
+  it("recusa alternativas repetidas na mesma pergunta", () => {
+    assert.equal(
+      validarPerguntas([p("Capital?", ["Brasília", "brasilia", "Recife"]), ...dez]),
+      "Pergunta 1: as alternativas 1 e 2 são iguais"
+    );
+  });
+
+  it("aceita a mesma alternativa em perguntas diferentes", () => {
+    // "Verdadeiro/Falso" em várias perguntas é legítimo.
+    assert.equal(validarPerguntas(dez), null);
   });
 });

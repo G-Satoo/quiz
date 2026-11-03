@@ -18,10 +18,7 @@
 
     <div id="aviso-travado" class="aviso-travado escondido">
       <strong id="motivo-trava">Este quiz já foi apresentado.</strong>
-      Perguntas, título e capa ficam como estão — você pode <em>bloquear</em> uma
-      pergunta que não queira mais usar, e isso vale na hora. Para mudar o conteúdo,
-      use <strong>Duplicar</strong>: a cópia é sua para editar à vontade e passa pela
-      aprovação de novo.
+      <span id="detalhe-trava"></span>
     </div>
 
     <!--
@@ -53,6 +50,47 @@
       </ol>
       <div class="barra-analise"><div></div></div>
       <p class="nota-analise" id="nota-analise">Costuma levar de 5 a 20 segundos.</p>
+    </div>
+
+    <!--
+      Montar a partida. Mora AQUI, e não numa janela do catálogo, de
+      propósito: é nesta página que se bloqueia e acrescenta pergunta,
+      e a estimativa de duração acompanha cada mudança. E a sala só
+      abre quando se clica em Apresentar — uma vez, já do jeito certo,
+      sem ter que voltar e gerar outro código a cada ajuste.
+    -->
+    <div class="cartao cartao-partida" id="cartao-partida">
+      <div class="cabeca-partida">
+        <div>
+          <h2 style="margin:0">Montar a partida</h2>
+          <p class="dica-campo" style="margin:4px 0 0">
+            Escolha uma duração ou ajuste à mão. A sala abre quando você clicar em Apresentar.
+          </p>
+        </div>
+        <button type="button" id="botao-apresentar">▶ Apresentar</button>
+      </div>
+
+      <div class="sugestoes-partida" id="sugestoes-partida">
+        <button type="button" class="discreto" data-minutos="0">Todas</button>
+        <button type="button" class="discreto" data-minutos="30">30 min</button>
+        <button type="button" class="discreto" data-minutos="60">1 hora</button>
+        <button type="button" class="discreto" data-minutos="120">2 horas</button>
+      </div>
+
+      <div class="campos-partida">
+        <div>
+          <label for="partida-quantidade">Perguntas</label>
+          <input id="partida-quantidade" type="number" inputmode="numeric" min="10" step="1">
+        </div>
+        <div>
+          <label for="partida-segundos">Segundos por pergunta</label>
+          <input id="partida-segundos" type="number" inputmode="numeric" min="10" max="300" step="1"
+                 placeholder="o de cada uma">
+        </div>
+      </div>
+
+      <p class="estimativa-partida" id="partida-estimativa"></p>
+      <p class="aviso-partida" id="partida-aviso"></p>
     </div>
 
     <div class="cartao" style="margin-bottom:26px">
@@ -147,6 +185,13 @@
     <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px">
       <h2 style="margin:0;flex:1">Perguntas</h2>
       <span id="contagem-perguntas" style="color:var(--texto-fraco);font-size:14px"></span>
+      <!--
+        O aviso de repetida aparece sozinho em cada cartão, mas numa
+        lista de 30 ele pode estar fora da tela. Este botão confere a
+        lista inteira e leva até a primeira repetida.
+      -->
+      <button type="button" class="discreto icone" id="botao-repetidas"
+              title="Conferir se há perguntas repetidas">Verificar repetidas</button>
     </div>
 
     <div id="perguntas"></div>
@@ -157,9 +202,6 @@
 
     <div class="rodape-editor">
       <button id="botao-salvar">Salvar quiz</button>
-      <button class="discreto escondido" id="botao-copiar">Duplicar</button>
-      <!-- Rascunho abre sala privada; publicado, a sala normal. -->
-      <a class="escondido" id="link-apresentar"><button type="button" class="discreto">Apresentar</button></a>
     </div>
   </div>
 
@@ -184,9 +226,92 @@ const $ = (id) => document.getElementById(id);
 const LIMITE_ALTERNATIVAS = 6;
 const MINIMO_ALTERNATIVAS = 2;
 
+/**
+ * A mesma normalização do servidor (normalizarTexto, em
+ * validacao.js): sem maiúsculas, acento ou pontuação. Aqui só serve
+ * para AVISAR antes de salvar; quem recusa é o servidor.
+ */
+function normalizar(texto) {
+  return String(texto ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * Marca em cada cartão se a pergunta repete uma anterior.
+ *
+ * Só mexe nos avisos, sem redesenhar a lista: é chamado a cada
+ * tecla, e redesenhar tiraria o cursor do campo em que a pessoa
+ * está digitando.
+ */
+function marcarRepetidas() {
+  const vistas = new Map();
+  const repetidas = [];
+
+  perguntas.forEach((pergunta, indice) => {
+    const chave = pergunta.ativa === false ? "" : normalizar(pergunta.enunciado);
+    const original = chave ? vistas.get(chave) : undefined;
+
+    if (original !== undefined) repetidas.push({ indice, original });
+    if (chave && original === undefined) vistas.set(chave, indice);
+
+    const aviso = document.querySelector(`.aviso-repetida[data-indice="${indice}"]`);
+    if (!aviso) return;
+
+    aviso.classList.toggle("escondido", original === undefined);
+    if (original !== undefined) aviso.textContent = `⚠ Igual à pergunta ${original + 1}`;
+  });
+
+  return repetidas;
+}
+
+let esconderAvisoRepetidas = null;
+
+$("botao-repetidas").addEventListener("click", () => {
+  limparErro();
+  clearTimeout(esconderAvisoRepetidas);
+  $("aviso-salvo").classList.add("escondido");
+
+  const repetidas = marcarRepetidas();
+
+  if (repetidas.length === 0) {
+    $("aviso-salvo").textContent = "Nenhuma pergunta repetida.";
+    $("aviso-salvo").classList.remove("escondido");
+    esconderAvisoRepetidas = setTimeout(() => $("aviso-salvo").classList.add("escondido"), 3000);
+    $("aviso-salvo").scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+
+  // A lista completa fica no aviso do topo, mas SEM rolar até ele
+  // (o mostrarErro rolaria): quem precisa ficar à vista é a primeira
+  // repetida, que já mostra o próprio aviso no cartão.
+  $("erro").textContent =
+    `${repetidas.length} pergunta(s) repetida(s): ` +
+    repetidas.map((r) => `a ${r.indice + 1} repete a ${r.original + 1}`).join("; ") +
+    ". Mude o texto ou bloqueie uma delas.";
+  $("erro").classList.remove("escondido");
+
+  const aviso = document.querySelector(`.aviso-repetida[data-indice="${repetidas[0].indice}"]`);
+  const cartao = aviso?.parentElement;
+  if (cartao) {
+    // Pula direto, sem animar: numa lista longa a rolagem suave
+    // leva segundos, e o contorno abaixo já mostra onde parou.
+    cartao.scrollIntoView({ block: "center" });
+    cartao.classList.add("destaque-repetida");
+    setTimeout(() => cartao.classList.remove("destaque-repetida"), 2500);
+  }
+});
+
 // O mesmo mínimo do servidor (MIN_PERGUNTAS, em validacao.js).
 // Aqui é só para avisar antes; quem decide é o servidor.
 const MINIMO_PERGUNTAS = 10;
+
+// E o máximo (MAX_PERGUNTAS): cabe uma partida de 2 horas. Quantas
+// entram em cada partida se escolhe na hora de apresentar.
+const MAXIMO_PERGUNTAS = 300;
 
 // O id vem da URL: editor.html?id=3 edita, sem id cria do zero.
 const parametros = new URLSearchParams(location.search);
@@ -206,6 +331,17 @@ let perguntas = [];
  * testadas, e mudá-las afeta toda apresentação futura.
  */
 let travado = false;
+
+// Quiz de outra pessoa: a página serve para montar a partida e
+// apresentar, não para editar. Quem quiser mudar duplica.
+let somenteLeitura = false;
+let autor = null;
+
+// Montar a partida. Declarados aqui em cima porque o desenho das
+// perguntas, que roda já no carregamento, atualiza a estimativa.
+const RESULTADO_S = 10;          // tela de resultado entre perguntas
+const SEGUNDOS_SUGERIDOS = 20;
+let sugestaoAtual = 0;           // em minutos; null quando ajustado à mão
 
 // ----- Capa -----
 //
@@ -346,7 +482,7 @@ const SITUACOES = {
   },
   publicado: {
     selo: "No catálogo",
-    texto: "Aprovado: aparece para todo mundo e vale pontos no ranking. Não se edita mais — para mudar, use Duplicar.",
+    texto: "Aprovado: aparece para todo mundo e vale pontos no ranking. Não se edita mais — para mudar, duplique pelo catálogo ou pelo seu perfil.",
     podeEnviar: false
   },
   recusado: {
@@ -362,7 +498,8 @@ const SITUACOES = {
 };
 
 function desenharSituacao() {
-  const info = SITUACOES[situacao];
+  // A situação na moderação é conversa entre o dono e a moderação.
+  const info = somenteLeitura ? null : SITUACOES[situacao];
   $("painel-catalogo").classList.toggle("escondido", !info);
   if (!info) return;
 
@@ -415,8 +552,15 @@ function aplicarTrava() {
   // Duas razões para travar, e a mais forte vem primeiro: estar no
   // catálogo (o que foi aprovado é o que fica) ou já ter sido
   // apresentado (as perguntas foram testadas com gente de verdade).
-  $("motivo-trava").textContent =
-    situacao === "publicado" ? "Este quiz está no catálogo." : "Este quiz já foi apresentado.";
+  $("motivo-trava").textContent = somenteLeitura
+    ? `Este quiz é de ${autor ?? "outra pessoa"}.`
+    : situacao === "publicado" ? "Este quiz está no catálogo." : "Este quiz já foi apresentado.";
+
+  $("detalhe-trava").textContent = somenteLeitura
+    ? "Você pode montar a partida e apresentar. Para mudar o conteúdo, duplique o quiz pelo catálogo — a cópia é sua."
+    : "Perguntas, título e capa ficam como estão — você pode bloquear uma pergunta que não queira mais usar, " +
+      "e isso vale na hora. Para mudar o conteúdo, duplique o quiz pelo catálogo ou pelo seu perfil: " +
+      "a cópia é sua e passa pela aprovação de novo.";
   $("aviso-travado").classList.remove("escondido");
 
   for (const id of ["titulo", "descricao", "categoria"]) {
@@ -485,15 +629,13 @@ if (quizId) {
     mostrarPrevia(quiz.imagem_url ?? null);
     if (quiz.imagem_credito) $("credito-capa").textContent = `Imagem: ${quiz.imagem_credito}`;
 
-    // Quiz existente pode ser duplicado e apresentado.
-    $("botao-copiar").classList.remove("escondido");
-    $("link-apresentar").href = `index.html?apresentar=${quizId}`;
-    $("link-apresentar").classList.remove("escondido");
-
     situacao = quiz.situacao;
     motivoSituacao = quiz.moderacao_motivo ?? null;
 
-    travado = (quiz.partidas ?? 0) > 0 || situacao === "publicado";
+    somenteLeitura = quiz.meu !== true;
+    autor = quiz.autor ?? null;
+
+    travado = somenteLeitura || (quiz.partidas ?? 0) > 0 || situacao === "publicado";
     if (travado) aplicarTrava();
 
     desenharSituacao();
@@ -505,9 +647,8 @@ if (quizId) {
     if (parametros.get("copia") === "1") {
       history.replaceState(null, "", `editor.html?id=${quizId}`);
       $("aviso-salvo").innerHTML =
-        "<strong>Cópia criada.</strong> Ela é sua: edite à vontade, apresente numa sala " +
-        'privada pelo <a href="perfil.html">seu perfil</a>, ou envie para aprovação para ' +
-        "ir ao catálogo.";
+        "<strong>Cópia criada.</strong> Ela é sua: edite à vontade, monte a partida aqui em " +
+        "cima e apresente numa sala privada, ou envie para aprovação para ir ao catálogo.";
       $("aviso-salvo").classList.remove("escondido");
     }
   } catch (erro) {
@@ -515,10 +656,10 @@ if (quizId) {
   }
 } else {
   perguntas = [perguntaVazia()];
-  $("botao-copiar").classList.add("escondido");
 }
 
 desenhar();
+aplicarSugestao(0);
 
 // ============================================================
 // Desenho
@@ -551,11 +692,16 @@ function desenhar() {
   contagem.textContent =
     (faltam > 0
       ? `${ativas} de ${MINIMO_PERGUNTAS} — falta${faltam === 1 ? "" : "m"} ${faltam}`
-      : `${ativas} ativa${ativas === 1 ? "" : "s"} de 50`) +
+      : `${ativas} ativa${ativas === 1 ? "" : "s"} de ${MAXIMO_PERGUNTAS}`) +
     (desativadas > 0 ? ` · ${desativadas} desativada${desativadas === 1 ? "" : "s"}` : "");
   contagem.style.color = faltam > 0 ? "var(--alerta)" : "var(--texto-fraco)";
 
-  $("botao-adicionar").disabled = perguntas.length >= 50;
+  // MAXIMO_PERGUNTAS ATIVAS, a mesma regra do servidor: as desativadas se
+  // acumulam com o tempo e não podem impedir de acrescentar.
+  $("botao-adicionar").disabled = ativas >= MAXIMO_PERGUNTAS;
+
+  marcarRepetidas();
+  atualizarPartida();
 }
 
 function desenharPergunta(pergunta, indice) {
@@ -581,7 +727,7 @@ function desenharPergunta(pergunta, indice) {
   inputTempo.disabled = travado;
   inputTempo.id = `segundos-${indice}`;
   inputTempo.type = "number";
-  inputTempo.min = 5;
+  inputTempo.min = 10;
   inputTempo.max = 300;
   inputTempo.value = pergunta.segundos;
   inputTempo.addEventListener("input", () => {
@@ -650,8 +796,10 @@ function desenharPergunta(pergunta, indice) {
     const aviso = document.createElement("span");
     aviso.className = "selo-desativada";
     aviso.textContent = "fora da partida";
+    if (somenteLeitura) { conferir.classList.add("escondido"); remover.classList.add("escondido"); }
     cabecalho.append(numero, aviso, tempo, conferir, subir, descer, remover);
   } else {
+    if (somenteLeitura) { conferir.classList.add("escondido"); remover.classList.add("escondido"); }
     cabecalho.append(numero, tempo, conferir, subir, descer, remover);
   }
 
@@ -663,7 +811,12 @@ function desenharPergunta(pergunta, indice) {
   enunciado.value = pergunta.enunciado;
   enunciado.addEventListener("input", () => {
     pergunta.enunciado = enunciado.value;
+    marcarRepetidas();
   });
+
+  const avisoRepetida = document.createElement("div");
+  avisoRepetida.className = "aviso-repetida escondido";
+  avisoRepetida.dataset.indice = indice;
 
   // ----- Alternativas -----
   const lista = document.createElement("div");
@@ -740,7 +893,7 @@ function desenharPergunta(pergunta, indice) {
     desenhar();
   });
 
-  cartao.append(cabecalho, enunciado, lista, adicionarAlternativa);
+  cartao.append(cabecalho, enunciado, avisoRepetida, lista, adicionarAlternativa);
 
   // Se esta pergunta já foi conferida, redesenha o veredito — o
   // desenhar() recria os cartões a cada mudança, e sem isto o
@@ -901,7 +1054,23 @@ $("botao-gerar").addEventListener("click", async () => {
       perguntas[0].enunciado === "" &&
       perguntas[0].alternativas.every((a) => a.texto === "");
 
-    perguntas = soTemVazia ? geradas : [...perguntas, ...geradas];
+    // A IA não sabe o que o quiz já tem, e gerar duas vezes sobre o
+    // mesmo tema traz perguntas repetidas. As que repetem uma ativa
+    // (ou outra da própria leva) ficam de fora — e a tela diz quantas.
+    const existentes = new Set(
+      (soTemVazia ? [] : perguntas)
+        .filter((p) => p.ativa !== false)
+        .map((p) => normalizar(p.enunciado))
+    );
+    const novas = geradas.filter((p) => {
+      const chave = normalizar(p.enunciado);
+      if (existentes.has(chave)) return false;
+      existentes.add(chave);
+      return true;
+    });
+    const descartadas = geradas.length - novas.length;
+
+    perguntas = soTemVazia ? novas : [...perguntas, ...novas];
 
     desenhar();
 
@@ -926,9 +1095,12 @@ $("botao-gerar").addEventListener("click", async () => {
         });
     }
 
-    $("aviso-salvo").textContent = doCache
-      ? `${geradas.length} pergunta(s) reaproveitadas de uma geração anterior. Revise e salve.`
-      : `${geradas.length} pergunta(s) geradas. Revise e salve.`;
+    $("aviso-salvo").textContent =
+      (doCache
+        ? `${novas.length} pergunta(s) reaproveitadas de uma geração anterior.`
+        : `${novas.length} pergunta(s) geradas.`) +
+      (descartadas > 0 ? ` ${descartadas} repetida(s) descartada(s).` : "") +
+      " Revise e salve.";
     $("aviso-salvo").classList.remove("escondido");
 
     $("perguntas").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -994,7 +1166,6 @@ async function salvar({ avisar = true } = {}) {
       // Troca a URL sem recarregar: a partir daqui a página edita
       // um quiz que existe, e recarregar não deve criar outro.
       history.replaceState(null, "", `editor.html?id=${quizId}`);
-      $("botao-copiar").classList.remove("escondido");
 
       situacao = quiz.situacao;
       motivoSituacao = null;
@@ -1129,31 +1300,168 @@ $("botao-publicar").addEventListener("click", async () => {
   }
 });
 
+// ============================================================
+// Montar a partida e apresentar
+//
+// A duração é uma ESTIMATIVA: quem passa para a próxima pergunta é
+// o apresentador, e a tela de resultado demora o que ele quiser. A
+// conta usa 10 s de resultado por pergunta, e a tela diz "≈".
+// ============================================================
+
+function ativasAgora() {
+  return perguntas.filter((p) => p.ativa !== false);
+}
+
+function formatarDuracao(segundosTotais) {
+  const minutos = Math.round(segundosTotais / 60);
+  if (minutos < 60) return `${Math.max(1, minutos)} min`;
+  const horas = Math.floor(minutos / 60);
+  const resto = minutos % 60;
+  return resto ? `${horas} h ${String(resto).padStart(2, "0")} min` : `${horas} h`;
+}
+
 /**
- * Duplicar: leva uma versão própria e mexe à vontade.
+ * Preenche os campos a partir de uma duração.
  *
- * Existe para não precisar proibir a edição de um quiz que já
- * funciona. Um quiz apresentado dezenas de vezes teve as
- * perguntas testadas com gente de verdade; deixar qualquer um
- * editá-lo é deixar qualquer um estragá-lo, e o estrago cai
- * sobre todas as apresentações futuras. Quem quer mudar copia.
+ * 0 = todas as perguntas, cada uma com o próprio tempo. As outras
+ * contam 20 s de pergunta + 10 s de resultado: com perguntas de
+ * sobra, sorteia quantas cabem; com perguntas de menos, usa todas e
+ * estica o tempo de cada uma (até o máximo de 300 s).
  */
-$("botao-copiar").addEventListener("click", async () => {
+function aplicarSugestao(minutos) {
+  sugestaoAtual = minutos;
+  const disponiveis = ativasAgora().length;
+  let aviso = "";
+
+  if (minutos === 0) {
+    $("partida-quantidade").value = disponiveis;
+    $("partida-segundos").value = "";
+  } else {
+    const alvo = minutos * 60;
+    const cabem = Math.floor(alvo / (SEGUNDOS_SUGERIDOS + RESULTADO_S));
+
+    if (cabem <= disponiveis) {
+      $("partida-quantidade").value = cabem;
+      $("partida-segundos").value = SEGUNDOS_SUGERIDOS;
+    } else {
+      const segundos = Math.min(300, Math.max(10, Math.round(alvo / Math.max(1, disponiveis) - RESULTADO_S)));
+      $("partida-quantidade").value = disponiveis;
+      $("partida-segundos").value = segundos;
+
+      const chega = disponiveis * (segundos + RESULTADO_S);
+      aviso = segundos === 300 && chega < alvo * 0.95
+        ? `O quiz tem ${disponiveis} perguntas: mesmo com 300 s (o máximo) cada uma, dá ≈ ${formatarDuracao(chega)}.`
+        : `O quiz tem ${disponiveis} perguntas, então cada uma fica com ${segundos} s para chegar a ${formatarDuracao(alvo)}.`;
+    }
+  }
+
+  for (const b of $("sugestoes-partida").children) {
+    b.classList.toggle("escolhida", Number(b.dataset.minutos) === minutos);
+  }
+
+  atualizarEstimativa(aviso);
+}
+
+/**
+ * Chamado sempre que as perguntas mudam. Com uma sugestão escolhida,
+ * refaz a conta (bloquear uma pergunta muda "Todas"); ajustado à mão,
+ * só recalcula a estimativa.
+ */
+function atualizarPartida() {
+  if (!$("partida-quantidade")) return;
+  if (sugestaoAtual !== null) aplicarSugestao(sugestaoAtual);
+  else atualizarEstimativa();
+}
+
+/** Confere os campos e devolve { quantidade, segundos } ou { erro }. */
+function lerPartida() {
+  const disponiveis = ativasAgora().length;
+  const quantidade = Number($("partida-quantidade").value);
+  const texto = $("partida-segundos").value.trim();
+  const segundos = texto === "" ? null : Number(texto);
+
+  if (disponiveis < MINIMO_PERGUNTAS) {
+    return { erro: `O quiz precisa de pelo menos ${MINIMO_PERGUNTAS} perguntas ativas para apresentar.` };
+  }
+  if (!Number.isInteger(quantidade) || quantidade < MINIMO_PERGUNTAS || quantidade > disponiveis) {
+    return { erro: `Escolha entre ${MINIMO_PERGUNTAS} e ${disponiveis} perguntas.` };
+  }
+  if (segundos !== null && (!Number.isInteger(segundos) || segundos < 10 || segundos > 300)) {
+    return { erro: "O tempo por pergunta vai de 10 a 300 segundos." };
+  }
+  return { quantidade, segundos, disponiveis };
+}
+
+function atualizarEstimativa(aviso = "") {
+  const leitura = lerPartida();
+
+  if (leitura.erro) {
+    $("partida-estimativa").textContent = leitura.erro;
+    $("partida-estimativa").classList.add("invalida");
+  } else {
+    const { quantidade, segundos, disponiveis } = leitura;
+
+    // Com o tempo de cada uma, a conta usa os tempos de verdade:
+    // a média das ativas, vezes quantas vão entrar.
+    const media = ativasAgora().reduce((soma, p) => soma + p.segundos, 0) / disponiveis;
+    const porPergunta = (segundos ?? media) + RESULTADO_S;
+
+    $("partida-estimativa").textContent =
+      `≈ ${formatarDuracao(quantidade * porPergunta)}` +
+      (segundos === null ? " (cada pergunta com o próprio tempo)" : "");
+    $("partida-estimativa").classList.remove("invalida");
+  }
+
+  $("partida-aviso").textContent = aviso;
+}
+
+$("sugestoes-partida").addEventListener("click", (evento) => {
+  const botao = evento.target.closest("button[data-minutos]");
+  if (botao) aplicarSugestao(Number(botao.dataset.minutos));
+});
+
+// Mexer num campo tira o destaque da sugestão: a partida passou a
+// ser sua, não mais a sugerida.
+for (const id of ["partida-quantidade", "partida-segundos"]) {
+  $(id).addEventListener("input", () => {
+    sugestaoAtual = null;
+    for (const b of $("sugestoes-partida").children) b.classList.remove("escolhida");
+    atualizarEstimativa();
+  });
+}
+
+// Trocar o tempo de uma pergunta muda a estimativa sem redesenhar.
+$("perguntas").addEventListener("input", () => atualizarPartida());
+
+/**
+ * Apresentar: salva o que mudou e abre a sala, já com a partida
+ * montada. É a única porta para abrir sala — uma vez, do jeito
+ * certo, sem gerar um código novo a cada ajuste.
+ */
+async function apresentar(botao) {
   limparErro();
-  $("botao-copiar").disabled = true;
+  botao.disabled = true;
 
   try {
-    const { quiz } = await pedir("POST", `/api/quizzes/${quizId}/copia`);
+    // O dono pode ter mexido nas perguntas: a sala precisa do que
+    // está na tela, não da última versão salva.
+    if (!travado && !(await salvar({ avisar: false }))) return;
+    if (!quizId) return;
 
-    // Vai direto para a cópia: quem clicou em duplicar quer
-    // editar a cópia, não continuar no original. O ?copia=1 faz a
-    // página dizer isso, já que a cópia é idêntica ao original.
-    location.href = `editor.html?id=${quiz.id}&copia=1`;
-  } catch (erro) {
-    mostrarErro(erro.message);
-    $("botao-copiar").disabled = false;
+    const leitura = lerPartida();
+    if (leitura.erro) return mostrarErro(leitura.erro);
+
+    const parametros = new URLSearchParams({ apresentar: quizId });
+    if (leitura.quantidade < leitura.disponiveis) parametros.set("quantidade", leitura.quantidade);
+    if (leitura.segundos !== null) parametros.set("segundos", leitura.segundos);
+
+    location.href = `index.html?${parametros}`;
+  } finally {
+    botao.disabled = false;
   }
-});
+}
+
+$("botao-apresentar").addEventListener("click", () => apresentar($("botao-apresentar")));
 
 </script>
 </body>

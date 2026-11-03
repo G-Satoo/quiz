@@ -69,7 +69,7 @@ const TOTAL = MIN_PERGUNTAS;
 function enchimento(quantas) {
   return Array.from({ length: quantas }, (_, i) => ({
     enunciado: `Extra ${i + 1}`,
-    segundos: 5,
+    segundos: 10,
     alternativas: [
       { texto: "Certa", correta: true },
       { texto: "Errada", correta: false }
@@ -80,16 +80,16 @@ function enchimento(quantas) {
 /**
  * Monta um quiz com o mínimo de perguntas e abre a sala.
  *
- * Tempo curto (5 segundos, o mínimo que o banco aceita) para o
+ * Tempo curto (10 segundos, o mínimo que o banco aceita) para o
  * teste do tempo esgotado não demorar meio minuto.
  */
-async function prepararPartida({ publicar = true } = {}) {
+async function prepararPartida({ publicar = true, total = TOTAL, config = {} } = {}) {
   const { dados: criado } = await cliente.post("/api/quizzes", {
     titulo: "Geografia",
     perguntas: [
       {
         enunciado: "Capital do Brasil?",
-        segundos: 5,
+        segundos: 10,
         alternativas: [
           { texto: "Brasília", correta: true },
           { texto: "São Paulo", correta: false },
@@ -98,13 +98,13 @@ async function prepararPartida({ publicar = true } = {}) {
       },
       {
         enunciado: "Maior rio do mundo?",
-        segundos: 5,
+        segundos: 10,
         alternativas: [
           { texto: "Nilo", correta: false },
           { texto: "Amazonas", correta: true }
         ]
       },
-      ...enchimento(TOTAL - 2)
+      ...enchimento(total - 2)
     ]
   });
 
@@ -115,7 +115,7 @@ async function prepararPartida({ publicar = true } = {}) {
     assert.equal(aprovacao.quiz.situacao, "publicado");
   }
 
-  const { dados } = await cliente.post("/api/salas", { quiz_id: criado.quiz.id });
+  const { dados } = await cliente.post("/api/salas", { quiz_id: criado.quiz.id, ...config });
   const cookie = cliente.cookieAtual;
 
   const host = await abrir({ cookie });
@@ -615,5 +615,45 @@ describe("partida de rascunho", () => {
     cliente.definirCookie(hostCookie);
     const { dados: meus } = await cliente.get("/api/quizzes?meus=1");
     assert.equal(meus.quizzes[0].avaliacoes, 0);
+  });
+});
+
+describe("partida com quantidade e tempo escolhidos", () => {
+  it("sorteia a quantidade pedida entre as perguntas do quiz", async () => {
+    // Quiz com 14; a partida pede 10.
+    const { codigo, host } = await prepararPartida({ total: 14, config: { quantidade: 10 } });
+    const ana = await entrarJogador(codigo, "Ana");
+
+    host.enviar({ tipo: "comecar" });
+    const primeira = await ana.esperar("pergunta");
+
+    assert.equal(primeira.total, 10);
+  });
+
+  it("usa o mesmo tempo escolhido em todas as perguntas", async () => {
+    const { codigo, host } = await prepararPartida({ config: { segundos: 15 } });
+    const ana = await entrarJogador(codigo, "Ana");
+
+    host.enviar({ tipo: "comecar" });
+    const primeira = await ana.esperar("pergunta");
+    assert.equal(primeira.segundos, 15);
+
+    ana.enviar({ tipo: "responder", alternativaId: primeira.alternativas[0].id });
+    await host.esperar("resultado");
+    host.enviar({ tipo: "proxima" });
+
+    const segunda = await ana.esperar("pergunta");
+    assert.equal(segunda.segundos, 15);
+  });
+
+  it("sem configuração, entram todas, cada uma com o seu tempo", async () => {
+    const { codigo, host } = await prepararPartida({ total: 12 });
+    const ana = await entrarJogador(codigo, "Ana");
+
+    host.enviar({ tipo: "comecar" });
+    const primeira = await ana.esperar("pergunta");
+
+    assert.equal(primeira.total, 12);
+    assert.equal(primeira.segundos, 10);
   });
 });

@@ -12,7 +12,7 @@ import { after, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { prepararBanco, limpar, encerrarConexoes } from "../ajuda/banco.js";
-import { MIN_PERGUNTAS } from "../../src/util/validacao.js";
+import { MIN_PERGUNTAS, MAX_PERGUNTAS } from "../../src/util/validacao.js";
 import { analisarComIA, carregarParaModeracao, LIMITE_DENUNCIAS } from "../../src/servicos/moderacao.js";
 import { subirServidor } from "../ajuda/servidor.js";
 import { pool } from "../../db/pool.js";
@@ -392,9 +392,12 @@ describe("PUT /api/quizzes/:id/perguntas", () => {
     const { dados: meio } = await cliente.get(`/api/quizzes/${quiz.id}`);
     assert.equal(meio.quiz.perguntas.find((p) => p.id === alvo.id).ativa, false);
 
-    // E volta.
+    // E volta: as ativas de agora mais ela. Reativar TODAS traria de
+    // volta também as antigas que repetem as atuais — e pergunta
+    // repetida é recusada.
+    const alvoDeVolta = { ...meio.quiz.perguntas.find((p) => p.id === alvo.id), ativa: true };
     await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: meio.quiz.perguntas.map((p) => ({ ...p, ativa: true }))
+      perguntas: [...ativas(meio.quiz), alvoDeVolta]
     });
 
     const { dados: depois } = await cliente.get(`/api/quizzes/${quiz.id}`);
@@ -437,7 +440,30 @@ describe("PUT /api/quizzes/:id/perguntas", () => {
     assert.equal(resposta.status, 400);
   });
 
-  it("as desativadas não contam para o limite de 50", async () => {
+  it("recusa salvar com pergunta repetida, dizendo qual", async () => {
+    const quiz = await criarQuiz();
+
+    const resposta = await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
+      perguntas: completar([pergunta("Qual é a capital do Brasil?"), pergunta("qual e a CAPITAL do brasil")])
+    });
+
+    assert.equal(resposta.status, 400);
+    assert.match(resposta.dados.erro, /Pergunta 2 repete a pergunta 1/);
+  });
+
+  it("não deixa criar quiz com pergunta repetida", async () => {
+    const resposta = await cliente.post("/api/quizzes", {
+      titulo: "Repetido",
+      perguntas: completar([pergunta("A mesma"), pergunta("A mesma.")])
+    });
+
+    assert.equal(resposta.status, 400);
+
+    const { dados } = await cliente.get("/api/quizzes?meus=1");
+    assert.equal(dados.quizzes.length, 0);
+  });
+
+  it("as desativadas não contam para o limite de perguntas", async () => {
     // Pergunta nunca se apaga, então as desativadas se acumulam. Se
     // contassem para o limite, um quiz pararia de salvar depois de
     // algumas trocas — foi o que travou um quiz real, com 220
@@ -458,10 +484,10 @@ describe("PUT /api/quizzes/:id/perguntas", () => {
     assert.ok(rows[0].total > 50, "as antigas continuam guardadas");
 
     const demais = await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: completar([], 51)
+      perguntas: completar([], MAX_PERGUNTAS + 1)
     });
     assert.equal(demais.status, 400);
-    assert.match(demais.dados.erro, /50 perguntas ativas/);
+    assert.match(demais.dados.erro, new RegExp(`${MAX_PERGUNTAS} perguntas ativas`));
   });
 
   it("a contagem do catálogo conta só as ativas", async () => {
@@ -1243,5 +1269,142 @@ describe("capa enviada pelo dono", () => {
     const resposta = await enviarCapa(quiz.id, png());
 
     assert.equal(resposta.status, 404);
+  });
+});
+
+describe("perfil público do autor", () => {
+  it("mostra nome e números, e nunca o e-mail", async () => {
+    const quiz = await criarQuiz("Do autor");
+    await publicar(quiz);
+
+    const { dados: lido } = await cliente.get(`/api/quizzes/${quiz.id}`);
+    const autorId = lido.quiz.autor_id;
+
+    cliente.esquecerCookie();
+    const { status, dados } = await cliente.get(`/api/usuarios/${autorId}`);
+
+    assert.equal(status, 200);
+    assert.equal(dados.usuario.nome, "Apresentador");
+    assert.equal(dados.usuario.quizzes, 1);
+    assert.ok(!("email" in dados.usuario), "o e-mail vazou no perfil público");
+  });
+
+  it("só o que está no catálogo: rascunho não conta nem aparece", async () => {
+    const publicado = await criarQuiz("Publicado");
+    await publicar(publicado);
+    await criarQuiz("Rascunho escondido");
+
+    const { dados: lido } = await cliente.get(`/api/quizzes/${publicado.id}`);
+    const autorId = lido.quiz.autor_id;
+
+    cliente.esquecerCookie();
+    const { dados: perfil } = await cliente.get(`/api/usuarios/${autorId}`);
+    const { dados: lista } = await cliente.get(`/api/quizzes?autor=${autorId}`);
+
+    assert.equal(perfil.usuario.quizzes, 1);
+    assert.deepEqual(lista.quizzes.map((q) => q.titulo), ["Publicado"]);
+  });
+
+  it("?autor= de uma pessoa não traz o quiz de outra", async () => {
+    await publicar(await criarQuiz("Da primeira"));
+
+    await novaConta("Segunda");
+    const meu = await criarQuiz("Da segunda");
+    await publicar(meu);
+
+    const { dados: lido } = await cliente.get(`/api/quizzes/${meu.id}`);
+    const { dados } = await cliente.get(`/api/quizzes?autor=${lido.quiz.autor_id}`);
+
+    assert.deepEqual(dados.quizzes.map((q) => q.titulo), ["Da segunda"]);
+  });
+
+  it("pessoa que não existe dá 404", async () => {
+    const { status } = await cliente.get("/api/usuarios/999999");
+    assert.equal(status, 404);
+  });
+});
+
+describe("foto de perfil", () => {
+  const png = (conteudo = "") => Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.alloc(16),
+    Buffer.from(conteudo)
+  ]);
+
+  async function enviarFoto(bytes, tipo = "image/png") {
+    const resposta = await fetch(`${base}/api/usuarios/eu/foto`, {
+      method: "PUT",
+      headers: { "Content-Type": tipo, Cookie: cliente.cookieAtual ?? "" },
+      body: bytes
+    });
+    return { status: resposta.status, dados: await resposta.json().catch(() => null) };
+  }
+
+  it("aprovada, aparece no /eu, no catálogo e é servida para qualquer um", async () => {
+    const arquivo = png("minha foto");
+    const envio = await enviarFoto(arquivo);
+    assert.equal(envio.status, 200);
+
+    const { dados: eu } = await cliente.get("/api/usuarios/eu");
+    assert.equal(eu.usuario.foto, envio.dados.foto);
+
+    await publicar(await criarQuiz("Com autor de foto"));
+    const { dados: catalogo } = await cliente.get("/api/quizzes");
+    assert.equal(catalogo.quizzes[0].autor_foto, envio.dados.foto);
+
+    cliente.esquecerCookie();
+    const resposta = await fetch(base + envio.dados.foto);
+    assert.equal(resposta.status, 200);
+    assert.ok(Buffer.from(await resposta.arrayBuffer()).equals(arquivo));
+  });
+
+  it("recusada não é gravada, e a foto anterior continua", async () => {
+    const boa = await enviarFoto(png("a boa"));
+    const ruim = await enviarFoto(png("[recusar]"));
+
+    assert.equal(ruim.status, 422);
+    assert.match(ruim.dados.erro, /não foi aceita/);
+
+    const { dados } = await cliente.get("/api/usuarios/eu");
+    assert.equal(dados.usuario.foto, boa.dados.foto);
+  });
+
+  it("recusa o que não é imagem e exige conta", async () => {
+    const html = await enviarFoto(Buffer.from("<html><script>alert(1)</script></html>"));
+    assert.equal(html.status, 400);
+
+    cliente.esquecerCookie();
+    const anonimo = await enviarFoto(png());
+    assert.equal(anonimo.status, 401);
+  });
+
+  it("tirar a foto volta para a inicial", async () => {
+    await enviarFoto(png());
+    const resposta = await fetch(`${base}/api/usuarios/eu/foto`, {
+      method: "DELETE",
+      headers: { Cookie: cliente.cookieAtual }
+    });
+    assert.equal(resposta.status, 204);
+
+    const { dados } = await cliente.get("/api/usuarios/eu");
+    assert.equal(dados.usuario.foto, null);
+  });
+
+  it("o perfil público traz foto, pontos, vitórias, o quiz mais acessado e a categoria", async () => {
+    await enviarFoto(png());
+    const quiz = await criarQuiz("O mais acessado");
+    await publicar(quiz);
+    await cliente.post("/api/salas", { quiz_id: quiz.id });
+
+    const { dados: lido } = await cliente.get(`/api/quizzes/${quiz.id}`);
+
+    cliente.esquecerCookie();
+    const { dados } = await cliente.get(`/api/usuarios/${lido.quiz.autor_id}`);
+
+    assert.ok(dados.usuario.foto);
+    assert.equal(dados.usuario.pontos, 0);
+    assert.equal(dados.usuario.vitorias, 0);
+    assert.deepEqual(dados.usuario.quiz_destaque, { id: quiz.id, titulo: "O mais acessado", acessos: 1 });
+    assert.equal(dados.usuario.categoria_favorita, "geral");
   });
 });

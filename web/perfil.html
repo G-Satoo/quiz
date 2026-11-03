@@ -22,15 +22,26 @@
           <h1 id="nome"></h1>
           <div class="subtitulo" id="email"></div>
           <div class="desde-perfil" id="desde"></div>
+
+          <!-- Só no seu perfil. A foto passa pela IA antes de aparecer. -->
+          <div class="acoes-foto escondido" id="acoes-foto">
+            <input type="file" id="arquivo-foto" accept="image/png,image/jpeg,image/webp" class="escondido">
+            <button type="button" class="discreto" id="botao-foto">Trocar foto</button>
+            <button type="button" class="discreto escondido" id="botao-tirar-foto">Remover</button>
+            <span class="retorno-foto" id="retorno-foto"></span>
+          </div>
         </div>
       </div>
+
+      <!-- Só no perfil público: o quiz mais acessado e onde a pessoa mais cria. -->
+      <div class="extras-perfil escondido" id="extras-perfil"></div>
 
       <!--
         Números do que a pessoa fez, não de quem ela é. São as
         mesmas tabelas que alimentam o ranking: o perfil é o
         ranking visto de dentro.
       -->
-      <div class="numeros-perfil">
+      <div class="numeros-perfil" id="numeros">
         <div class="numero-perfil"><strong id="n-partidas">0</strong><span>partidas</span></div>
         <div class="numero-perfil"><strong id="n-vitorias">0</strong><span>vitórias</span></div>
         <div class="numero-perfil"><strong id="n-pontos">0</strong><span>pontos no total</span></div>
@@ -39,8 +50,8 @@
       </div>
 
       <div class="topo-secao-perfil">
-        <h2>Meus quizzes</h2>
-        <a href="editor.html"><button>+ Novo quiz</button></a>
+        <h2 id="titulo-lista">Meus quizzes</h2>
+        <a href="editor.html" id="link-novo"><button>+ Novo quiz</button></a>
       </div>
       <!--
         O catálogo particular: TODOS os seus quizzes, inclusive os
@@ -48,9 +59,10 @@
         um rascunho numa sala privada — o catálogo público só mostra
         o que foi aprovado.
       -->
-      <p class="subtitulo" style="margin-top:-4px">
+      <p class="subtitulo" id="explicacao-lista" style="margin-top:-4px">
         Rascunhos você apresenta numa sala privada, por código. No catálogo
-        público só aparece o que foi aprovado.
+        público só aparece o que foi aprovado. Para mudar um quiz que já está
+        no catálogo, duplique: a cópia é sua.
       </p>
       <div class="catalogo meus-quizzes" id="meus"></div>
       <div id="meus-vazio" class="vazio escondido">Você ainda não criou nenhum quiz.</div>
@@ -61,7 +73,7 @@
         <a href="moderacao.html">Fila de moderação →</a>
       </p>
 
-      <div class="rodape-perfil">
+      <div class="rodape-perfil" id="rodape-perfil">
         <button class="discreto" id="sair">Sair da conta</button>
       </div>
     </section>
@@ -77,9 +89,6 @@
 
 import { montarAvatar } from "./avatar.js";
 import { artePorCategoria } from "./capas.js";
-
-// O mesmo mínimo do servidor (MIN_PERGUNTAS, em validacao.js).
-const MINIMO_PERGUNTAS = 10;
 
 const $ = (id) => document.getElementById(id);
 
@@ -99,6 +108,12 @@ async function pedir(metodo, caminho) {
 
 const numero = (n) => n.toLocaleString("pt-BR");
 
+const CATEGORIAS = {
+  geral: "Geral", anime: "Anime", games: "Games", filmes: "Filmes",
+  musica: "Música", esportes: "Esportes", historia: "História",
+  ciencia: "Ciência", tecnologia: "Tecnologia", educacao: "Educação"
+};
+
 const ROTULOS_SITUACAO = {
   rascunho: "Rascunho",
   publicado: "No catálogo",
@@ -106,14 +121,174 @@ const ROTULOS_SITUACAO = {
   revisao: "Em revisão"
 };
 
-try {
+// ?id=N: o perfil PÚBLICO de alguém, aberto pelo autor de um quiz
+// no catálogo. Sem ?id, o seu perfil, com o que só você vê.
+const idPublico = Number(new URLSearchParams(location.search).get("id")) || null;
+
+/**
+ * O perfil de outra pessoa: nome, desde quando está aqui, números
+ * públicos e os quizzes dela que estão no catálogo. Nada de e-mail,
+ * rascunho ou "Sair" — a rota pública nem devolve essas coisas.
+ */
+async function mostrarPublico() {
+  try {
+    const [{ usuario }, { quizzes }] = await Promise.all([
+      pedir("GET", `/api/usuarios/${idPublico}`),
+      pedir("GET", `/api/quizzes?autor=${idPublico}`)
+    ]);
+
+    document.title = `${usuario.nome} — Quiz`;
+    $("lugar-avatar").replaceWith(montarAvatar(usuario.nome, "avatar avatar-perfil", usuario.foto));
+    $("nome").textContent = usuario.nome;
+    $("email").classList.add("escondido");
+    $("desde").textContent = "no quiz desde " +
+      new Date(usuario.criado_em).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+
+    const numeros = [
+      [numero(usuario.quizzes), "quizzes no catálogo"],
+      [numero(usuario.acessos), "acessos nos quizzes"],
+      [usuario.nota === null ? "—" : `★ ${usuario.nota.toFixed(1).replace(".", ",")}`, "nota média"],
+      [numero(usuario.partidas), "partidas jogadas"],
+      [numero(usuario.pontos), "pontos"],
+      [numero(usuario.vitorias), "vitórias"]
+    ];
+    $("numeros").replaceChildren(...numeros.map(([valor, rotulo]) => {
+      const caixa = document.createElement("div");
+      caixa.className = "numero-perfil";
+      const forte = document.createElement("strong");
+      forte.textContent = valor;
+      const legenda = document.createElement("span");
+      legenda.textContent = rotulo;
+      caixa.append(forte, legenda);
+      return caixa;
+    }));
+
+    const extras = $("extras-perfil");
+    if (usuario.quiz_destaque) {
+      const linha = document.createElement("p");
+      linha.append("Mais acessado: ");
+      const link = document.createElement("a");
+      link.href = `editor.html?id=${usuario.quiz_destaque.id}`;
+      link.textContent = usuario.quiz_destaque.titulo;
+      linha.append(link, ` · ${numero(usuario.quiz_destaque.acessos)} acessos`);
+      extras.append(linha);
+    }
+    if (usuario.categoria_favorita) {
+      const linha = document.createElement("p");
+      linha.textContent = `Cria mais sobre: ${CATEGORIAS[usuario.categoria_favorita] ?? usuario.categoria_favorita}`;
+      extras.append(linha);
+    }
+    extras.classList.toggle("escondido", extras.childElementCount === 0);
+
+    $("titulo-lista").textContent = `Quizzes de ${usuario.nome}`;
+    for (const id of ["link-novo", "explicacao-lista", "rodape-perfil", "link-moderacao"]) {
+      $(id).classList.add("escondido");
+    }
+
+    $("meus-vazio").textContent = "Nenhum quiz no catálogo ainda.";
+    $("meus-vazio").classList.toggle("escondido", quizzes.length > 0);
+    for (const quiz of quizzes) $("meus").append(desenharMeu(quiz, { publico: true }));
+
+    $("perfil").classList.remove("escondido");
+  } catch (erro) {
+    $("erro").textContent = erro.message;
+    $("erro").classList.remove("escondido");
+  }
+}
+
+// ----- Foto de perfil (só no seu) -----
+
+let avatarAtual = null;
+let nomeDoPerfil = "";
+
+function trocarAvatar(foto) {
+  const novo = montarAvatar(nomeDoPerfil, "avatar avatar-perfil", foto);
+  avatarAtual.replaceWith(novo);
+  avatarAtual = novo;
+  $("botao-tirar-foto").classList.toggle("escondido", !foto);
+}
+
+/**
+ * Recorta no centro em quadrado e reduz a 256x256, no navegador.
+ * Qualquer foto serve, o arquivo fica pequeno, e redesenhar num
+ * canvas descarta os metadados (como a localização do celular).
+ */
+async function prepararFoto(arquivo) {
+  const imagem = await createImageBitmap(arquivo);
+  const lado = Math.min(imagem.width, imagem.height);
+
+  const tela = document.createElement("canvas");
+  tela.width = tela.height = 256;
+  tela.getContext("2d").drawImage(
+    imagem,
+    (imagem.width - lado) / 2, (imagem.height - lado) / 2, lado, lado,
+    0, 0, 256, 256
+  );
+  imagem.close();
+
+  const gerar = (tipo) => new Promise((resolver) => tela.toBlob(resolver, tipo, 0.85));
+  const webp = await gerar("image/webp");
+  return webp?.type === "image/webp" ? webp : gerar("image/jpeg");
+}
+
+$("botao-foto").addEventListener("click", () => $("arquivo-foto").click());
+
+$("arquivo-foto").addEventListener("change", async () => {
+  const arquivo = $("arquivo-foto").files[0];
+  $("arquivo-foto").value = "";
+  if (!arquivo) return;
+
+  const retorno = $("retorno-foto");
+  $("botao-foto").disabled = true;
+  retorno.className = "retorno-foto";
+
+  try {
+    const blob = await prepararFoto(arquivo);
+
+    // A IA olha antes de a foto ir ao ar: leva alguns segundos.
+    retorno.textContent = "Analisando a foto…";
+
+    const resposta = await fetch("/api/usuarios/eu/foto", {
+      method: "PUT",
+      headers: { "Content-Type": blob.type },
+      body: blob
+    });
+    const dados = await resposta.json().catch(() => null);
+    if (!resposta.ok) throw new Error(dados?.erro ?? "Não consegui enviar a foto");
+
+    trocarAvatar(dados.foto);
+    retorno.textContent = "Foto aprovada.";
+    retorno.classList.add("ok");
+  } catch (erro) {
+    // Recusada: a foto anterior continua, e o motivo aparece aqui.
+    retorno.textContent = erro.message === "Failed to fetch"
+      ? "Não consegui falar com o servidor."
+      : erro.message;
+    retorno.classList.add("falhou");
+  } finally {
+    $("botao-foto").disabled = false;
+  }
+});
+
+$("botao-tirar-foto").addEventListener("click", async () => {
+  await fetch("/api/usuarios/eu/foto", { method: "DELETE" });
+  trocarAvatar(null);
+  $("retorno-foto").textContent = "";
+});
+
+if (idPublico) await mostrarPublico();
+else try {
   // As duas ao mesmo tempo: nenhuma depende da outra.
   const [{ perfil }, { quizzes }] = await Promise.all([
     pedir("GET", "/api/usuarios/eu/perfil"),
     pedir("GET", "/api/quizzes?meus=1")
   ]);
 
-  $("lugar-avatar").replaceWith(montarAvatar(perfil.nome, "avatar avatar-perfil"));
+  avatarAtual = montarAvatar(perfil.nome, "avatar avatar-perfil", perfil.foto);
+  $("lugar-avatar").replaceWith(avatarAtual);
+  nomeDoPerfil = perfil.nome;
+  $("acoes-foto").classList.remove("escondido");
+  $("botao-tirar-foto").classList.toggle("escondido", !perfil.foto);
   $("nome").textContent = perfil.nome;
   $("email").textContent = perfil.email;
   $("desde").textContent = "no quiz desde " +
@@ -147,7 +322,7 @@ try {
  * público: aqui a pessoa veio para agir sobre os próprios quizzes,
  * e esconder "Apresentar" seria esconder o motivo da visita.
  */
-function desenharMeu(quiz) {
+function desenharMeu(quiz, { publico = false } = {}) {
   const cartao = document.createElement("article");
   cartao.className = "card-quiz card-meu";
 
@@ -172,7 +347,8 @@ function desenharMeu(quiz) {
   selo.dataset.situacao = quiz.situacao;
   selo.textContent = ROTULOS_SITUACAO[quiz.situacao] ?? quiz.situacao;
   if (quiz.moderacao_motivo && quiz.situacao !== "publicado") selo.title = quiz.moderacao_motivo;
-  capa.append(selo);
+  // No perfil público todos estão no catálogo: o selo não diria nada.
+  if (!publico) capa.append(selo);
 
   const titulo = document.createElement("h3");
   titulo.className = "titulo-card";
@@ -187,27 +363,33 @@ function desenharMeu(quiz) {
   const acoes = document.createElement("div");
   acoes.className = "acoes-meu";
 
-  // Apresentar abre a sala no catálogo, que é onde mora a tela do
-  // apresentador. Rascunho abre sala privada; publicado, a normal.
-  const apresentar = document.createElement("a");
-  const pronto = quiz.perguntas >= MINIMO_PERGUNTAS;
-  apresentar.className = "botao-acao" + (pronto ? "" : " desligado");
-  apresentar.textContent = "Apresentar";
-  if (pronto) {
-    apresentar.href = `index.html?apresentar=${quiz.id}`;
-  } else {
-    apresentar.title = `Precisa de pelo menos ${MINIMO_PERGUNTAS} perguntas ativas`;
-    apresentar.setAttribute("aria-disabled", "true");
-  }
+  // "Abrir sala" vai à página do quiz: é lá que se monta a partida
+  // (quantas perguntas, quanto tempo), se ajusta o conteúdo e se
+  // apresenta. Rascunho abre sala privada; publicado, a normal.
+  const abrir = document.createElement("a");
+  abrir.className = "botao-acao";
+  abrir.href = "editor.html?id=" + quiz.id;
+  abrir.textContent = "Abrir sala";
 
-  const editar = document.createElement("a");
-  editar.className = "botao-acao discreto";
-  editar.href = "editor.html?id=" + quiz.id;
-  // Publicado não se edita — no editor ele só bloqueia perguntas e
-  // duplica. O rótulo diz isso antes do clique.
-  editar.textContent = quiz.situacao === "publicado" ? "Abrir" : "Editar";
+  // Duplicar: a cópia é sua para mudar à vontade — é o caminho
+  // para alterar um quiz que já está no catálogo.
+  const duplicar = document.createElement("button");
+  duplicar.type = "button";
+  duplicar.className = "botao-acao discreto";
+  duplicar.textContent = "Duplicar";
+  duplicar.addEventListener("click", async () => {
+    duplicar.disabled = true;
+    try {
+      const { quiz: copia } = await pedir("POST", `/api/quizzes/${quiz.id}/copia`);
+      location.href = `editor.html?id=${copia.id}&copia=1`;
+    } catch (erro) {
+      duplicar.disabled = false;
+      $("erro").textContent = erro.message;
+      $("erro").classList.remove("escondido");
+    }
+  });
 
-  acoes.append(apresentar, editar);
+  acoes.append(abrir, duplicar);
   cartao.append(capa, titulo, meta, acoes);
   return cartao;
 }

@@ -93,6 +93,7 @@ function lerId(valor) {
  *
  * ?categoria=anime  limita a uma categoria
  * ?meus=1           só os seus (exige sessão; sem ela, vem vazio)
+ * ?autor=ID         só os publicados de uma pessoa (perfil público)
  */
 router.get("/", async (req, res, next) => {
   try {
@@ -105,6 +106,11 @@ router.get("/", async (req, res, next) => {
     // de quem são aquelas linhas.
     const soMeus = req.query.meus === "1";
     if (soMeus && !req.usuarioId) return res.json({ quizzes: [] });
+
+    // ?autor=ID: os quizzes publicados de uma pessoa, para o perfil
+    // público dela. Continua só o que está no catálogo — rascunho
+    // alheio não aparece por aqui.
+    const autorFiltro = req.query.autor === undefined ? null : lerId(req.query.autor);
 
     const { rows } = await pool.query(
       // O filtro é opcional: $2 nulo devolve tudo. Assim a mesma
@@ -130,7 +136,9 @@ router.get("/", async (req, res, next) => {
               (SELECT COUNT(*) FROM avaliacoes v
                  JOIN resultados r USING (sala, jogador_id)
                 WHERE v.quiz_id = q.id AND r.vale_ranking)::int AS avaliacoes,
-              u.nome AS autor,
+              u.nome AS autor, u.id AS autor_id,
+              (SELECT '/api/usuarios/' || f.usuario_id || '/foto?v=' || floor(extract(epoch FROM f.enviada_em))::bigint
+                 FROM fotos_perfil f WHERE f.usuario_id = u.id) AS autor_foto,
               (q.usuario_id = $1) AS meu,
               q.situacao,
               -- O motivo de uma recusa é conversa entre a moderação
@@ -142,10 +150,11 @@ router.get("/", async (req, res, next) => {
         WHERE (CASE WHEN $3::bool THEN q.usuario_id = $1
                     ELSE q.situacao = 'publicado' END)
           AND ($2::text IS NULL OR q.categoria = $2)
+          AND ($4::int IS NULL OR q.usuario_id = $4)
         ORDER BY q.criado_em DESC`,
       // $1 pode ser nulo (visitante): aí `meu` vem nulo em toda
       // linha, que é a verdade — não há "seu" sem sessão.
-      [req.usuarioId, categoriaFiltro, soMeus]
+      [req.usuarioId, categoriaFiltro, soMeus, autorFiltro]
     );
 
     res.json({ quizzes: rows });
@@ -183,7 +192,9 @@ router.get("/:id", async (req, res, next) => {
               (SELECT COUNT(*) FROM avaliacoes v
                  JOIN resultados r USING (sala, jogador_id)
                 WHERE v.quiz_id = q.id AND r.vale_ranking)::int AS avaliacoes,
-              u.nome AS autor,
+              u.nome AS autor, u.id AS autor_id,
+              (SELECT '/api/usuarios/' || f.usuario_id || '/foto?v=' || floor(extract(epoch FROM f.enviada_em))::bigint
+                 FROM fotos_perfil f WHERE f.usuario_id = u.id) AS autor_foto,
               (q.usuario_id = $2) AS meu,
               q.situacao, q.moderacao_motivo
          FROM quizzes q

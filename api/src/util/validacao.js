@@ -138,8 +138,10 @@ const MAX_ALTERNATIVAS = 6;
 // Os mesmos limites do CHECK da migração 002. Repetidos aqui de
 // propósito: o banco é a garantia final, mas quem erra merece uma
 // mensagem em português em vez de um erro de constraint.
-const MIN_SEGUNDOS = 5;
-const MAX_SEGUNDOS = 300;
+// 10, e não 5: é o tempo de referência da pontuação (vale o fator
+// 1). Abaixo disso a pergunta vira teste de reflexo de leitura.
+export const MIN_SEGUNDOS = 10;
+export const MAX_SEGUNDOS = 300;
 
 /**
  * Valida uma pergunta inteira, com as alternativas.
@@ -148,6 +150,38 @@ const MAX_SEGUNDOS = 300;
  * dizendo QUAL pergunta está errada — numa lista de 15, "pergunta
  * inválida" não ajuda ninguém.
  */
+/**
+ * O texto na forma em que duas versões "iguais" ficam idênticas:
+ * sem maiúsculas, sem acento, sem pontuação, com um espaço só entre
+ * as palavras. "Qual é a capital do Brasil?" e "qual e a capital
+ * do brasil" viram a mesma coisa.
+ *
+ * Não pega a mesma pergunta escrita com outras palavras — isso é
+ * sentido, não texto, e fica com a análise da IA na aprovação.
+ */
+export function normalizarTexto(texto) {
+  return String(texto ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/** Devolve [i, j] do primeiro par repetido (j < i), ou null. */
+function primeiraRepeticao(textos) {
+  const vistos = new Map();
+
+  for (const [i, texto] of textos.entries()) {
+    const chave = normalizarTexto(texto);
+    if (!chave) continue;
+    if (vistos.has(chave)) return [i, vistos.get(chave)];
+    vistos.set(chave, i);
+  }
+
+  return null;
+}
+
 export function validarPergunta(pergunta, posicao) {
   const onde = `Pergunta ${posicao + 1}`;
 
@@ -186,6 +220,13 @@ export function validarPergunta(pergunta, posicao) {
     }
   }
 
+  // Duas alternativas iguais: o jogador não teria como saber qual
+  // das duas é "a certa", e a pergunta vira sorteio.
+  const repetida = primeiraRepeticao(alternativas.map((a) => a.texto));
+  if (repetida) {
+    return `${onde}: as alternativas ${repetida[1] + 1} e ${repetida[0] + 1} são iguais`;
+  }
+
   // O banco garante "no máximo uma correta" (índice único parcial
   // da migração 002). O "exatamente uma" é aqui: uma pergunta sem
   // resposta certa não dá para corrigir na hora da partida.
@@ -212,6 +253,16 @@ export function validarPergunta(pergunta, posicao) {
 export const MIN_PERGUNTAS = 10;
 
 /**
+ * Quantas perguntas ATIVAS um quiz pode ter.
+ *
+ * Era 50, o que dava uns 25 minutos de partida. Subiu para caber
+ * uma partida de 2 horas (a ~30 s por pergunta, contando a tela de
+ * resultado, são 240). Quem decide o tamanho é o dono; na hora de
+ * apresentar, escolhe-se quantas delas entram.
+ */
+export const MAX_PERGUNTAS = 300;
+
+/**
  * Valida a lista inteira de perguntas de um quiz.
  */
 export function validarPerguntas(perguntas) {
@@ -219,7 +270,7 @@ export function validarPerguntas(perguntas) {
   if (perguntas.length === 0) return "O quiz precisa de pelo menos uma pergunta";
   // Limite do tamanho da LISTA, só para conter o pedido: pergunta
   // nunca se apaga, e as desativadas se acumulam com o tempo.
-  if (perguntas.length > 300) return "Lista de perguntas grande demais";
+  if (perguntas.length > 1000) return "Lista de perguntas grande demais";
 
   for (const [posicao, pergunta] of perguntas.entries()) {
     const erro = validarPergunta(pergunta, posicao);
@@ -229,13 +280,25 @@ export function validarPerguntas(perguntas) {
   // Desativadas continuam guardadas, mas não valem para a
   // partida. Um quiz só com perguntas desativadas abriria uma
   // sala que termina na primeira tela.
+  // Pergunta repetida entre as ATIVAS. As desativadas ficam de fora:
+  // é normal reescrever uma pergunta aposentada e reativá-la depois.
+  // A posição na mensagem é a da lista enviada, que é a que a tela
+  // mostra — "repete a pergunta 3" aponta direto para o cartão.
+  const posicoesAtivas = [];
+  perguntas.forEach((p, i) => { if (p.ativa !== false) posicoesAtivas.push(i); });
+
+  const repetida = primeiraRepeticao(posicoesAtivas.map((i) => perguntas[i].enunciado));
+  if (repetida) {
+    const [depois, antes] = repetida.map((i) => posicoesAtivas[i] + 1);
+    return `Pergunta ${depois} repete a pergunta ${antes}`;
+  }
+
   const ativas = perguntas.filter((p) => p.ativa !== false).length;
 
-  // O limite de 50 vale para as ATIVAS, que são o que a partida
-  // tem. Contar as desativadas faria um quiz com 45 perguntas e
+  // O limite vale para as ATIVAS, que são o que a partida tem. Contar as desativadas faria um quiz com 45 perguntas e
   // algumas aposentadas parar de salvar sem que ninguém entendesse
   // por quê.
-  if (ativas > 50) return "São no máximo 50 perguntas ativas por quiz";
+  if (ativas > MAX_PERGUNTAS) return `São no máximo ${MAX_PERGUNTAS} perguntas ativas por quiz`;
 
   if (ativas < MIN_PERGUNTAS) {
     const faltam = MIN_PERGUNTAS - ativas;

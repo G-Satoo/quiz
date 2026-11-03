@@ -52,7 +52,7 @@ export const MAX_JOGADORES = 200;
  *
  * Devolve false se o código já estiver em uso.
  */
-export async function criar(codigo, { quizId, apresentadorId, titulo }) {
+export async function criar(codigo, { quizId, apresentadorId, titulo, quantidade = null, segundos = null }) {
   // HSETNX grava só se a chave ainda não tiver aquele campo, numa
   // operação atômica. É o mesmo raciocínio do UNIQUE do banco:
   // duas requisições simultâneas com o mesmo código sorteado não
@@ -67,7 +67,12 @@ export async function criar(codigo, { quizId, apresentadorId, titulo }) {
       apresentador_id: String(apresentadorId),
       titulo,
       fase: "aguardando",
-      criada_em: new Date().toISOString()
+      criada_em: new Date().toISOString(),
+      // Como o apresentador quis a partida: quantas perguntas e
+      // quantos segundos cada. Vazio é "todas, cada uma com o seu
+      // tempo" — o jeito de antes.
+      quantidade: quantidade === null ? "" : String(quantidade),
+      segundos: segundos === null ? "" : String(segundos)
     })
     .expire(chaveSala(codigo), VALIDADE_SEGUNDOS)
     .exec();
@@ -90,6 +95,8 @@ export async function ler(codigo) {
     titulo: dados.titulo,
     fase: dados.fase,
     criadaEm: dados.criada_em,
+    quantidade: dados.quantidade ? Number(dados.quantidade) : null,
+    segundos: dados.segundos ? Number(dados.segundos) : null,
     apresentadorAusenteDesde: dados.apresentador_ausente_desde ?? null
   };
 }

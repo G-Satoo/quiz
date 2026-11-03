@@ -446,3 +446,37 @@ describe("sala de rascunho", () => {
     assert.equal(resposta.status, 404);
   });
 });
+
+describe("partida montada pelo apresentador", () => {
+  it("abre sala escolhendo quantas perguntas e quantos segundos", async () => {
+    const sala = await criarSala();
+
+    const resposta = await cliente.post("/api/salas", {
+      quiz_id: sala.quizId,
+      quantidade: MIN_PERGUNTAS,
+      segundos: 15
+    });
+
+    assert.equal(resposta.status, 201);
+    assert.equal(resposta.dados.sala.perguntas, MIN_PERGUNTAS);
+    assert.equal(resposta.dados.sala.segundos, 15);
+  });
+
+  it("recusa mais perguntas do que o quiz tem, ou menos que o mínimo", async () => {
+    const sala = await criarSala(); // o quiz tem exatamente o mínimo
+
+    for (const quantidade of [MIN_PERGUNTAS + 1, MIN_PERGUNTAS - 1, 10.5, "dez"]) {
+      const resposta = await cliente.post("/api/salas", { quiz_id: sala.quizId, quantidade });
+      assert.equal(resposta.status, 400, `quantidade ${quantidade}`);
+    }
+  });
+
+  it("recusa tempo por pergunta fora dos limites", async () => {
+    const sala = await criarSala();
+
+    for (const segundos of [9, 301, 12.5]) {
+      const resposta = await cliente.post("/api/salas", { quiz_id: sala.quizId, segundos });
+      assert.equal(resposta.status, 400, `segundos ${segundos}`);
+    }
+  });
+});

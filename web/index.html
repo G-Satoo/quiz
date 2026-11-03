@@ -133,6 +133,13 @@
     </form>
   </dialog>
 
+  <!--
+    Cartãozinho do autor: abre ao clicar no ícone de quem fez um
+    quiz, ali mesmo, sem sair do catálogo. É montado no JavaScript
+    a cada abertura.
+  -->
+  <div id="cartao-autor" class="cartao-autor escondido" role="dialog" aria-label="Perfil de quem fez o quiz"></div>
+
   <div class="conteudo">
 
     <!--
@@ -209,21 +216,6 @@
         <div class="instrucao" style="margin:4px 0 18px"><strong id="endereco"></strong></div>
         <div style="color:var(--texto-fraco);font-size:14px">com o código</div>
         <div class="codigo-grande" id="codigo"></div>
-      </div>
-
-      <div class="barra-sala">
-        <!--
-          Editar abre em OUTRA ABA de propósito: sair desta
-          página derrubaria a conexão do apresentador, e a sala
-          com ela. Numa aba separada, o telão continua de pé com
-          o código visível enquanto você mexe nas perguntas.
-        -->
-        <a id="link-editar" href="editor.html" target="_blank" rel="noopener">
-          <button class="discreto">Editar perguntas</button>
-        </a>
-        <span class="nota-sala">
-          as mudanças valem a partir do momento em que a partida começar
-        </span>
       </div>
 
       <div style="display:flex;align-items:center;gap:16px;margin:24px 0 10px">
@@ -400,7 +392,7 @@ function desenharConta() {
   perfil.className = "botao-perfil";
   perfil.title = eu.nome + " — ver perfil";
   perfil.setAttribute("aria-label", "Seu perfil");
-  perfil.append(montarAvatar(eu.nome, "avatar avatar-topo"));
+  perfil.append(montarAvatar(eu.nome, "avatar avatar-topo", eu.foto));
 
   area.append(perfil);
 }
@@ -418,6 +410,224 @@ function pedirConta(motivo, depois) {
   $("motivo-login").textContent = motivo;
   $("erro-login").classList.add("escondido");
   mostrar("login");
+}
+
+/**
+ * Quem fez o quiz: só o ícone — a foto, ou a inicial na cor da
+ * pessoa. O nome aparece ao passar o mouse, e clicar abre o
+ * cartãozinho com o perfil dela, sem sair do catálogo.
+ */
+function linhaDoAutor(quiz, classeExtra = "") {
+  const botao = document.createElement("button");
+  botao.type = "button";
+  botao.className = "autor-card " + classeExtra;
+
+  if (!quiz.autor) {
+    botao.hidden = true;
+    return botao;
+  }
+
+  const nome = quiz.meu ? "você" : quiz.autor;
+  botao.title = quiz.meu ? "Você" : quiz.autor;
+  botao.setAttribute("aria-label", `Perfil de ${nome}`);
+  botao.append(montarAvatar(quiz.autor, "avatar avatar-autor", quiz.autor_foto));
+
+  botao.addEventListener("click", (evento) => {
+    // Senão o clique "atravessa" para o fechamento por clique fora.
+    evento.stopPropagation();
+    abrirCartaoAutor(quiz, botao);
+  });
+
+  return botao;
+}
+
+// ----- Cartãozinho do autor -----
+
+// Um perfil não muda enquanto a página está aberta: clicar no mesmo
+// autor de novo não precisa perguntar ao servidor outra vez.
+const perfisCarregados = new Map();
+let ancoraDoCartao = null;
+
+function fecharCartaoAutor() {
+  $("cartao-autor").classList.add("escondido");
+  ancoraDoCartao = null;
+}
+
+/**
+ * Põe o cartão logo abaixo do ícone (ou acima, se não couber), sem
+ * sair da tela. No celular vira uma folha presa embaixo, que é onde
+ * o polegar alcança.
+ */
+function posicionarCartao() {
+  const caixa = $("cartao-autor");
+  if (!ancoraDoCartao) return;
+
+  if (innerWidth < 520) {
+    caixa.style.left = caixa.style.top = "";
+    caixa.classList.add("folha");
+    return;
+  }
+
+  caixa.classList.remove("folha");
+  const alvo = ancoraDoCartao.getBoundingClientRect();
+
+  // O ícone saiu da tela (rolagem): o cartão ficaria apontando
+  // para o nada.
+  if (alvo.bottom < 0 || alvo.top > innerHeight) return fecharCartaoAutor();
+  const largura = caixa.offsetWidth;
+  const altura = caixa.offsetHeight;
+
+  const esquerda = Math.min(Math.max(8, alvo.left + alvo.width / 2 - largura / 2), innerWidth - largura - 8);
+  let topo = alvo.bottom + 8;
+  if (topo + altura > innerHeight - 8) topo = Math.max(8, alvo.top - altura - 8);
+
+  caixa.style.left = `${esquerda}px`;
+  caixa.style.top = `${topo}px`;
+}
+
+function numeroDoCartao(valor, rotulo) {
+  const caixa = document.createElement("div");
+  caixa.className = "numero-cartao";
+  const forte = document.createElement("strong");
+  forte.textContent = valor;
+  const legenda = document.createElement("span");
+  legenda.textContent = rotulo;
+  caixa.append(forte, legenda);
+  return caixa;
+}
+
+async function abrirCartaoAutor(quiz, ancora) {
+  const caixa = $("cartao-autor");
+
+  // Clicar no mesmo ícone com o cartão aberto fecha.
+  if (ancoraDoCartao === ancora) return fecharCartaoAutor();
+
+  ancoraDoCartao = ancora;
+  caixa.replaceChildren(Object.assign(document.createElement("p"), {
+    className: "carregando-cartao",
+    textContent: "Carregando…"
+  }));
+  caixa.classList.remove("escondido");
+  posicionarCartao();
+
+  try {
+    let usuario = perfisCarregados.get(quiz.autor_id);
+    if (!usuario) {
+      ({ usuario } = await pedir("GET", `/api/usuarios/${quiz.autor_id}`));
+      perfisCarregados.set(quiz.autor_id, usuario);
+    }
+
+    // O usuário pode ter clicado em outro ícone enquanto carregava.
+    if (ancoraDoCartao !== ancora) return;
+
+    const avatar = montarAvatar(usuario.nome, "avatar avatar-cartao", usuario.foto);
+
+    // A faixa do topo usa as cores do avatar: o cartão "veste" a
+    // cor da pessoa, a mesma que ela tem em todo o site.
+    const faixa = document.createElement("div");
+    faixa.className = "faixa-cartao";
+    faixa.style.background = avatar.style.background;
+
+    const nome = document.createElement("strong");
+    nome.className = "nome-cartao";
+    nome.textContent = usuario.nome; // texto, nunca innerHTML
+
+    const desde = document.createElement("span");
+    desde.className = "desde-cartao";
+    desde.textContent = "no quiz desde " +
+      new Date(usuario.criado_em).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+
+    const numeros = document.createElement("div");
+    numeros.className = "numeros-cartao";
+    numeros.append(
+      numeroDoCartao(usuario.quizzes.toLocaleString("pt-BR"), "quizzes"),
+      numeroDoCartao(usuario.acessos.toLocaleString("pt-BR"), "acessos"),
+      numeroDoCartao(usuario.nota === null ? "—" : "★ " + usuario.nota.toFixed(1).replace(".", ","), "nota"),
+      numeroDoCartao(usuario.partidas.toLocaleString("pt-BR"), "partidas"),
+      numeroDoCartao(usuario.pontos.toLocaleString("pt-BR"), "pontos"),
+      numeroDoCartao(usuario.vitorias.toLocaleString("pt-BR"), "vitórias")
+    );
+
+    const extras = document.createElement("div");
+    extras.className = "extras-cartao";
+
+    if (usuario.quiz_destaque) {
+      const linha = document.createElement("p");
+      linha.append("Mais acessado: ");
+      const link = document.createElement("a");
+      link.href = `editor.html?id=${usuario.quiz_destaque.id}`;
+      link.textContent = usuario.quiz_destaque.titulo;
+      linha.append(link);
+      extras.append(linha);
+    }
+
+    if (usuario.categoria_favorita) {
+      const linha = document.createElement("p");
+      linha.textContent = `Cria mais sobre: ${CATEGORIAS[usuario.categoria_favorita] ?? usuario.categoria_favorita}`;
+      extras.append(linha);
+    }
+
+    const verPerfil = document.createElement("a");
+    verPerfil.className = "ver-perfil";
+    verPerfil.href = quiz.meu ? "perfil.html" : `perfil.html?id=${usuario.id}`;
+    verPerfil.textContent = quiz.meu ? "Ver meu perfil" : "Ver perfil completo";
+
+    const corpo = document.createElement("div");
+    corpo.className = "corpo-cartao";
+    corpo.append(avatar, nome, desde, numeros, extras, verPerfil);
+
+    caixa.replaceChildren(faixa, corpo);
+    posicionarCartao();
+  } catch (erro) {
+    if (ancoraDoCartao !== ancora) return;
+    caixa.replaceChildren(Object.assign(document.createElement("p"), {
+      className: "carregando-cartao",
+      textContent: erro.message
+    }));
+  }
+}
+
+// Fecha com clique fora ou Esc. Ao rolar, acompanha o ícone — e só
+// fecha se o ícone sair da tela.
+document.addEventListener("click", (evento) => {
+  if (ancoraDoCartao && !$("cartao-autor").contains(evento.target)) fecharCartaoAutor();
+});
+document.addEventListener("keydown", (evento) => {
+  if (evento.key === "Escape" && ancoraDoCartao) fecharCartaoAutor();
+});
+addEventListener("scroll", posicionarCartao, { passive: true });
+addEventListener("resize", posicionarCartao);
+
+// ============================================================
+// Abrir sala e duplicar// ============================================================
+// Abrir sala e duplicar
+// ============================================================
+
+/** Leva à página do quiz, onde a partida é montada antes de abrir. */
+function prepararPartida(quiz) {
+  location.href = `editor.html?id=${quiz.id}`;
+}
+
+/**
+ * Cria uma cópia sua e vai editá-la. É o jeito de mudar um quiz:
+ * o original — de outra pessoa, ou seu e já no catálogo — fica
+ * como está.
+ */
+async function duplicarQuiz(quiz, botao) {
+  if (!eu) {
+    return pedirConta("Entre para duplicar um quiz e editar a sua cópia.", () => duplicarQuiz(quiz, botao));
+  }
+
+  botao.disabled = true;
+
+  try {
+    const { quiz: copia } = await pedir("POST", `/api/quizzes/${quiz.id}/copia`);
+    location.href = `editor.html?id=${copia.id}&copia=1`;
+  } catch (erro) {
+    botao.disabled = false;
+    $("erro-quizzes").textContent = erro.message;
+    $("erro-quizzes").classList.remove("escondido");
+  }
 }
 
 // ============================================================
@@ -470,18 +680,24 @@ $("formulario-denuncia").addEventListener("submit", async (evento) => {
   }
 });
 
-// Vindo do perfil, com ?apresentar=ID: abre a sala direto. É o
-// caminho para apresentar um RASCUNHO, que não está no catálogo
-// público e por isso não tem cartão aqui.
-const pedidoDeApresentar = Number(new URLSearchParams(location.search).get("apresentar")) || null;
+// Vindo da página do quiz, com ?apresentar=ID e a partida já
+// montada lá (quantas perguntas, quantos segundos): abre a sala
+// direto. É a ÚNICA porta para abrir sala — assim ela abre uma vez,
+// do jeito certo, e não se gera um código novo a cada ajuste.
+const parametrosDaUrl = new URLSearchParams(location.search);
+const pedidoDeApresentar = Number(parametrosDaUrl.get("apresentar")) || null;
 
 function atenderPedidoDeApresentar() {
   if (!pedidoDeApresentar) return;
   history.replaceState(null, "", "index.html");
 
+  const configuracao = {};
+  if (parametrosDaUrl.get("quantidade")) configuracao.quantidade = Number(parametrosDaUrl.get("quantidade"));
+  if (parametrosDaUrl.get("segundos")) configuracao.segundos = Number(parametrosDaUrl.get("segundos"));
+
   // abrirSala desabilita o botão que a chamou; aqui não há botão,
   // então vai um de mentira. Sem conta, ela mesma pede login.
-  abrirSala(pedidoDeApresentar, document.createElement("button"));
+  abrirSala(pedidoDeApresentar, document.createElement("button"), configuracao);
 }
 
 // Vindo da tela final de uma partida (jogar.html), com
@@ -849,19 +1065,18 @@ function desenharDestaque() {
   jogar.innerHTML = '<span aria-hidden="true">▶</span>';
   jogar.append(jogavel(quiz) ? " Abrir sala" : " Incompleto");
   jogar.disabled = !jogavel(quiz);
-  jogar.addEventListener("click", () => abrirSala(quiz.id, jogar));
+  jogar.addEventListener("click", () => prepararPartida(quiz));
   acoes.append(jogar);
 
-  // O segundo botão só existe quando há o que fazer com ele. Um
-  // "Detalhes" levaria a uma página que não temos; editar o
-  // quiz de outra pessoa não é permitido.
-  if (quiz.meu) {
-    const editar = document.createElement("a");
-    editar.href = "editor.html?id=" + quiz.id;
-    editar.className = "pilula pilula-contorno";
-    editar.textContent = "Editar";
-    acoes.append(editar);
-  } else {
+  // Duplicar é o caminho para mudar um quiz: a cópia é sua.
+  const duplicar = document.createElement("button");
+  duplicar.type = "button";
+  duplicar.className = "pilula pilula-contorno";
+  duplicar.textContent = "Duplicar";
+  duplicar.addEventListener("click", () => duplicarQuiz(quiz, duplicar));
+  acoes.append(duplicar);
+
+  if (!quiz.meu) {
     // Discreto de propósito: está ali para quem precisa, sem
     // competir com "Abrir sala" pela atenção de quem não precisa.
     const denunciar = document.createElement("button");
@@ -872,6 +1087,9 @@ function desenharDestaque() {
     acoes.append(denunciar);
   }
 
+  // Quem fez vem primeiro na linha de cima, antes da categoria:
+  // é o primeiro dado da ficha do quiz.
+  linha.prepend(linhaDoAutor(quiz, "autor-destaque"));
   texto.append(linha, titulo, descricao, acoes);
   interior.append(capa, texto);
 
@@ -1128,7 +1346,7 @@ function desenharJogador(jogador, posicao) {
   pontos.textContent = jogador.pontos.toLocaleString("pt-BR") + " pts";
 
   dados.append(nome, partidas, pontos);
-  cartao.append(selo, montarAvatar(jogador.nome, "avatar avatar-jogador"), dados);
+  cartao.append(selo, montarAvatar(jogador.nome, "avatar avatar-jogador", jogador.foto), dados);
   return cartao;
 }
 
@@ -1207,27 +1425,23 @@ function desenharCartao(quiz, estreito) {
   const acoes = document.createElement("div");
   acoes.className = "acoes-capa";
 
-  // Só "Abrir sala". Editar deixou de morar aqui: quem vai
-  // apresentar abre a sala primeiro e ajusta as perguntas lá
-  // dentro, com o código já no telão. Assim a ordem da tela
-  // acompanha a ordem do que a pessoa realmente faz.
+  // "Abrir sala" leva à página do quiz, onde a partida é montada
+  // (quantas perguntas, quanto tempo) — e, se o quiz é seu, onde
+  // se ajusta o conteúdo. A sala só abre de lá, uma vez, já do
+  // jeito certo: abrir aqui direto obrigava a voltar ao editor e
+  // abrir OUTRA sala, com outro código, a cada ajuste.
   const jogar = document.createElement("button");
   jogar.textContent = jogavel(quiz) ? "Abrir sala" : "Incompleto";
   jogar.disabled = !jogavel(quiz);
-  jogar.addEventListener("click", () => abrirSala(quiz.id, jogar));
+  jogar.addEventListener("click", () => prepararPartida(quiz));
 
-  acoes.append(jogar);
+  // Duplicar: a cópia é sua, para mudar o que quiser.
+  const duplicar = document.createElement("button");
+  duplicar.className = "discreto";
+  duplicar.textContent = "Duplicar";
+  duplicar.addEventListener("click", () => duplicarQuiz(quiz, duplicar));
 
-  // Editar só no que é seu. O cartão de outra pessoa não ganha
-  // um botão desabilitado: oferecer e negar é pior que não
-  // oferecer. Quem quiser mexer usa Duplicar, dentro do editor
-  // da própria cópia.
-  if (quiz.meu) {
-    const editar = document.createElement("a");
-    editar.href = "editor.html?id=" + quiz.id;
-    editar.innerHTML = '<button class="discreto">Editar</button>';
-    acoes.append(editar);
-  }
+  acoes.append(jogar, duplicar);
 
   capa.append(selo, contador, aviso, acoes);
 
@@ -1235,21 +1449,13 @@ function desenharCartao(quiz, estreito) {
   titulo.className = "titulo-card";
   titulo.textContent = quiz.titulo; // texto, nunca innerHTML
 
-  // O número de acessos saiu daqui: ele agora mora na capa, no
-  // canto esquerdo. Embaixo fica o tamanho do quiz e de quem
-  // ele é — o autor passou a importar quando o catálogo deixou
-  // de ser a sua própria lista.
+  // O número de acessos mora na capa, no canto esquerdo. Embaixo
+  // ficam quem fez e o tamanho do quiz.
   const meta = document.createElement("div");
   meta.className = "meta-card";
   meta.textContent = quiz.perguntas + " pergunta" + (quiz.perguntas === 1 ? "" : "s");
 
-  if (quiz.autor) {
-    const autor = document.createElement("span");
-    autor.className = "autor-card";
-    autor.textContent = quiz.meu ? "você" : quiz.autor;
-    meta.append(" · ", autor);
-  }
-
+  meta.prepend(linhaDoAutor(quiz));
   cartao.append(capa, titulo, meta);
 
   // Licença livre exige atribuir o autor. Crédito escondido não
@@ -1300,7 +1506,7 @@ function montarCapa(capa, quiz, grande) {
   }
 }
 
-async function abrirSala(quizId, botao) {
+async function abrirSala(quizId, botao, configuracao = {}) {
   // A sala tem um apresentador, e apresentador precisa ser
   // alguém: é ele que o servidor reconhece ao reconectar, e sem
   // isso qualquer um assumiria o controle de uma partida em
@@ -1309,17 +1515,16 @@ async function abrirSala(quizId, botao) {
   if (!eu) {
     return pedirConta(
       "Entre para abrir uma sala e apresentar.",
-      () => abrirSala(quizId, botao)
+      () => abrirSala(quizId, botao, configuracao)
     );
   }
 
   botao.disabled = true;
 
   try {
-    const { sala } = await pedir("POST", "/api/salas", { quiz_id: quizId });
+    const { sala } = await pedir("POST", "/api/salas", { quiz_id: quizId, ...configuracao });
 
     quizDaSala = quizId;
-    $("link-editar").href = "editor.html?id=" + quizId;
 
     codigoSala = sala.codigo;
     $("codigo").textContent = sala.codigo;

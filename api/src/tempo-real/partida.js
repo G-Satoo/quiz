@@ -29,12 +29,7 @@
 
 import { pool } from "../../db/pool.js";
 import * as salas from "./salas.js";
-
-// Quanto cada pergunta vale, e quanto disso é prêmio por
-// velocidade. Metade fixa, metade pelo tempo: só velocidade faria
-// a partida ser sobre reflexo; só acerto faria empate geral.
-const PONTOS_ACERTO = 500;
-const PONTOS_VELOCIDADE = 500;
+import { pontosDoAcerto } from "./pontuacao.js";
 
 // Folga para a viagem da resposta pela rede. Sem ela, quem
 // responde no último segundo é punido pela latência, não pelo
@@ -60,6 +55,38 @@ function cancelarCronometro(codigo) {
  * caminho: nenhuma pergunta ou resposta durante o jogo encosta
  * no banco.
  */
+/**
+ * Aplica a configuração da sala às perguntas do quiz.
+ *
+ * QUANTAS: sorteia essa quantidade entre as ativas, e depois as põe
+ * de volta na ordem em que o autor escreveu. Sorteio para que duas
+ * partidas de 30 minutos do mesmo quiz grande não sejam iguais;
+ * ordem do autor porque ela costuma ter intenção (do fácil ao
+ * difícil, de um assunto para outro).
+ *
+ * SEGUNDOS: o mesmo tempo para todas, sobrescrevendo o de cada uma.
+ *
+ * Sem configuração, devolve todas como estão — o jeito de antes.
+ */
+export function montarPartida(perguntas, { quantidade, segundos } = {}) {
+  let escolhidas = perguntas;
+
+  if (quantidade && quantidade < perguntas.length) {
+    // Fisher-Yates nos índices: cada subconjunto tem a mesma chance.
+    const indices = perguntas.map((_, i) => i);
+    for (let i = indices.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [indices[i], indices[j]] = [indices[j], indices[i]];
+    }
+    escolhidas = indices
+      .slice(0, quantidade)
+      .sort((a, b) => a - b)
+      .map((i) => perguntas[i]);
+  }
+
+  return segundos ? escolhidas.map((p) => ({ ...p, segundos })) : escolhidas;
+}
+
 export async function carregarPerguntas(quizId) {
   const { rows } = await pool.query(
     `SELECT p.id, p.ordem, p.enunciado, p.segundos,
@@ -190,12 +217,9 @@ export async function responder(codigo, jogadorId, alternativaId) {
 /**
  * Fecha a pergunta, calcula os pontos e devolve o que transmitir.
  *
- * A pontuação: quem acerta leva 500 fixos mais até 500 pela
- * velocidade, proporcional ao tempo que sobrou. Responder no
- * primeiro segundo de uma pergunta de 20s vale quase 1000;
- * responder no último vale pouco mais de 500. Errar vale zero —
- * mas responder errado rápido não é punido além disso, para a
- * partida não virar um jogo de não arriscar.
+ * A pontuação está em pontuacao.js: metade pelo acerto, metade
+ * pela velocidade, e o total pesado pelo tempo da pergunta —
+ * pergunta curta vale mais que pergunta longa.
  */
 export async function fecharPergunta(codigo) {
   cancelarCronometro(codigo);
@@ -223,10 +247,7 @@ export async function fecharPergunta(codigo) {
     let ganhos = 0;
 
     if (acertou) {
-      const limiteMs = pergunta.segundos * 1000;
-      const sobrou = Math.max(0, limiteMs - resposta.decorridoMs) / limiteMs;
-
-      ganhos = PONTOS_ACERTO + Math.round(PONTOS_VELOCIDADE * sobrou);
+      ganhos = pontosDoAcerto(pergunta.segundos, resposta.decorridoMs);
       await salas.somarPontos(codigo, resposta.jogadorId, ganhos);
     }
 

@@ -17,7 +17,7 @@ import { pool } from "../../db/pool.js";
 import { exigirLogin } from "../middlewares/autenticacao.js";
 import { limitar } from "../middlewares/limite.js";
 import { gerarCodigo, normalizarCodigo } from "../util/codigo.js";
-import { lerInteiro, MIN_PERGUNTAS } from "../util/validacao.js";
+import { lerInteiro, MIN_PERGUNTAS, MIN_SEGUNDOS, MAX_SEGUNDOS } from "../util/validacao.js";
 import * as salas from "../tempo-real/salas.js";
 
 const router = Router();
@@ -141,14 +141,29 @@ router.post(
         );
       }
 
+      // A partida do jeito que o apresentador montou: quantas
+      // perguntas e quantos segundos cada. Os dois são opcionais —
+      // sem eles, entram todas, cada uma com o seu tempo.
+      const { quantidade, segundos, erro: erroConfig } = lerConfiguracao(req.body, rows[0].perguntas);
+      if (erroConfig) return res.status(400).json({ erro: erroConfig });
+
       const codigo = await sortearCodigoLivre({
         quizId,
+        quantidade,
+        segundos,
         apresentadorId: req.usuarioId,
         titulo: rows[0].titulo
       });
 
       res.status(201).json({
-        sala: { codigo, titulo: rows[0].titulo, perguntas: rows[0].perguntas, fase: "aguardando" }
+        sala: {
+          codigo,
+          titulo: rows[0].titulo,
+          // Quantas vão de fato para a partida, não quantas o quiz tem.
+          perguntas: quantidade ?? rows[0].perguntas,
+          segundos,
+          fase: "aguardando"
+        }
       });
     } catch (erro) {
       next(erro);
@@ -164,6 +179,40 @@ router.post(
  * checagem e a criação cabe outra requisição. Quem decide é a
  * operação atômica do Redis (HSETNX), e nós tratamos a derrota.
  */
+/**
+ * Lê e confere quantas perguntas e quantos segundos o apresentador
+ * escolheu. `disponiveis` é quantas ativas o quiz tem.
+ *
+ * Número que não é inteiro é recusado, e não "corrigido": se a tela
+ * mandou 7,5 perguntas, algo está errado nela, e consertar calado
+ * esconderia o defeito.
+ */
+function lerConfiguracao(corpo, disponiveis) {
+  const bruto = { quantidade: corpo?.quantidade, segundos: corpo?.segundos };
+  const vazio = (valor) => valor === undefined || valor === null || valor === "";
+
+  let quantidade = null;
+  let segundos = null;
+
+  if (!vazio(bruto.quantidade)) {
+    quantidade = Number(bruto.quantidade);
+    if (!Number.isInteger(quantidade) || quantidade < MIN_PERGUNTAS || quantidade > disponiveis) {
+      return {
+        erro: `Escolha entre ${MIN_PERGUNTAS} e ${disponiveis} perguntas — é o que este quiz tem.`
+      };
+    }
+  }
+
+  if (!vazio(bruto.segundos)) {
+    segundos = Number(bruto.segundos);
+    if (!Number.isInteger(segundos) || segundos < MIN_SEGUNDOS || segundos > MAX_SEGUNDOS) {
+      return { erro: `O tempo por pergunta vai de ${MIN_SEGUNDOS} a ${MAX_SEGUNDOS} segundos.` };
+    }
+  }
+
+  return { quantidade, segundos };
+}
+
 async function sortearCodigoLivre(dados, tentativas = 5) {
   for (let i = 0; i < tentativas; i++) {
     const codigo = gerarCodigo();

@@ -1937,3 +1937,198 @@ button.perigo { background: var(--erro); color: #fff; }
 
 .botao-acao.discreto { background: transparent; border: 1px solid var(--borda); color: var(--texto); }
 .botao-acao.desligado { opacity: 0.45; cursor: default; }
+
+/* Pergunta repetida: aviso logo abaixo do enunciado, antes de salvar. */
+.aviso-repetida {
+  margin: -8px 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--alerta);
+}
+
+/* O cartão para onde "Verificar repetidas" levou, por um instante. */
+.destaque-repetida {
+  outline: 2px solid var(--alerta);
+  outline-offset: 2px;
+  transition: outline-color 0.3s ease;
+}
+
+#botao-repetidas { font-size: 12px; white-space: nowrap; }
+
+
+/* ============================================================
+   Montar a partida
+   ============================================================ */
+
+.sugestoes-partida { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 16px; }
+.sugestoes-partida button { padding: 9px 6px; font-size: 13px; }
+.sugestoes-partida button.escolhida {
+  border-color: var(--destaque);
+  color: var(--destaque);
+  background: rgba(78, 163, 255, 0.1);
+}
+
+.campos-partida { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.campos-partida input { margin-bottom: 8px; }
+
+.estimativa-partida { margin: 4px 0 6px; font-size: 18px; font-weight: 800; }
+.estimativa-partida.invalida { font-size: 14px; font-weight: 600; color: var(--erro); }
+.aviso-partida { margin: 0 0 14px; font-size: 13px; color: var(--alerta); }
+.aviso-partida:empty { display: none; }
+
+@media (max-width: 420px) {
+  .sugestoes-partida { grid-template-columns: 1fr 1fr; }
+  .campos-partida { grid-template-columns: 1fr; }
+}
+
+
+/* ============================================================
+   Montar a partida (na página do quiz)
+   ============================================================ */
+
+.cartao-partida { margin-bottom: 20px; border-color: rgba(78, 163, 255, 0.35); }
+.cabeca-partida { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+#botao-apresentar { flex: none; white-space: nowrap; }
+
+@media (max-width: 520px) {
+  .cabeca-partida { flex-direction: column; align-items: stretch; }
+}
+
+button.botao-acao { border: none; cursor: pointer; font-family: inherit; }
+button.botao-acao.discreto { border: 1px solid var(--borda); }
+
+/* ============================================================
+   Autor do quiz (catálogo e banner)
+   ============================================================ */
+
+.autor-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin: 2px 0 1px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--texto-fraco);
+  text-decoration: none;
+}
+
+.autor-card:hover .nome-autor { color: var(--texto); text-decoration: underline; }
+
+.nome-autor { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+.avatar-autor { width: 16px; height: 16px; font-size: 9px; }
+
+/* No banner, um pouco maior, logo abaixo do título. */
+.autor-destaque { margin: -6px 0 12px; font-size: 13px; color: rgba(255, 255, 255, 0.75); }
+.autor-destaque .avatar-autor { width: 22px; height: 22px; font-size: 11px; }
+
+/* Foto de perfil por cima da inicial. */
+.avatar { position: relative; overflow: hidden; }
+.avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+
+/* ============================================================
+   Autor: só o ícone, e o cartãozinho do perfil
+   ============================================================ */
+
+/* Botão sem cara de botão: é só o ícone. */
+.autor-card {
+  display: inline-flex;
+  vertical-align: middle;
+  padding: 0;
+  margin: 0 6px 0 0;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.autor-card:hover { filter: none; }
+.autor-card:hover .avatar, .autor-card:focus-visible .avatar {
+  box-shadow: 0 0 0 2px var(--fundo), 0 0 0 3px var(--texto-fraco);
+}
+
+.avatar-autor { width: 18px; height: 18px; font-size: 9px; }
+.meta-card { display: flex; align-items: center; }
+
+/* No banner, maior, logo abaixo do título. */
+.autor-destaque { display: inline-flex; margin: -4px 0 14px; }
+.autor-destaque .avatar-autor { width: 30px; height: 30px; font-size: 13px; }
+
+.cartao-autor {
+  position: fixed;
+  z-index: 50;
+  width: 290px;
+  border: 1px solid var(--borda);
+  border-radius: 14px;
+  background: var(--superficie);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+  animation: surgir 0.14s ease-out;
+}
+
+/* No celular, uma folha presa embaixo. */
+.cartao-autor.folha { left: 8px !important; right: 8px; bottom: 8px; top: auto !important; width: auto; }
+
+.faixa-cartao { height: 54px; opacity: 0.85; }
+
+.corpo-cartao { padding: 0 16px 16px; display: flex; flex-direction: column; align-items: flex-start; }
+
+.avatar-cartao {
+  width: 64px;
+  height: 64px;
+  font-size: 26px;
+  margin-top: -32px;
+  box-shadow: 0 0 0 4px var(--superficie);
+}
+
+.nome-cartao { margin-top: 8px; font-size: 16px; overflow-wrap: anywhere; }
+.desde-cartao { font-size: 12px; color: var(--texto-fraco); margin-bottom: 12px; }
+
+.numeros-cartao { width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
+.numero-cartao {
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--fundo);
+}
+.numero-cartao strong { font-family: var(--mono); font-size: 15px; }
+.numero-cartao span { font-size: 10px; color: var(--texto-fraco); text-transform: uppercase; letter-spacing: 0.04em; }
+
+.extras-cartao { width: 100%; font-size: 13px; color: var(--texto-fraco); }
+.extras-cartao p { margin: 0 0 4px; overflow-wrap: anywhere; }
+.extras-cartao a { color: var(--texto); font-weight: 600; }
+
+.ver-perfil { margin-top: 8px; font-size: 13px; font-weight: 700; }
+.carregando-cartao { margin: 0; padding: 16px; font-size: 13px; color: var(--texto-fraco); }
+
+@media (prefers-reduced-motion: reduce) {
+  .cartao-autor { animation: none; }
+}
+
+
+/* ----- Foto de perfil e extras do perfil ----- */
+.acoes-foto { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.acoes-foto button { padding: 6px 12px; font-size: 13px; }
+.retorno-foto { font-size: 13px; color: var(--texto-fraco); }
+.retorno-foto.ok { color: var(--sucesso); }
+.retorno-foto.falhou { color: var(--erro); }
+
+.extras-perfil { margin: -18px 0 28px; font-size: 14px; color: var(--texto-fraco); }
+.extras-perfil p { margin: 0 0 4px; overflow-wrap: anywhere; }
+.extras-perfil a { color: var(--texto); font-weight: 600; }
+
+@media (max-width: 520px) {
+  .acoes-foto { justify-content: center; }
+}
+
+/* Ícone do autor colado no número de perguntas (uma regra antiga
+   espalhava os dois nas pontas da linha). */
+.card-quiz .meta-card { justify-content: flex-start; gap: 6px; }
+.card-quiz .meta-card .autor-card { margin: 0; }
+
+/* No banner, o ícone do autor abre a linha de cima (categoria,
+   perguntas, nota, acessos). */
+.linha-meta .autor-destaque { margin: 0 12px 0 0; }
+.linha-meta .autor-destaque .avatar-autor { width: 24px; height: 24px; font-size: 11px; }

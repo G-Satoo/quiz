@@ -605,7 +605,8 @@ async function comecar(socket) {
   // As perguntas são copiadas para o Redis AGORA, uma vez. Daqui
   // para a frente o Postgres sai do caminho do jogo — e editar o
   // quiz no meio da partida deixa de afetar quem está jogando.
-  const perguntas = await partida.carregarPerguntas(sala.quizId);
+  const todas = await partida.carregarPerguntas(sala.quizId);
+  const perguntas = partida.montarPartida(todas, sala);
   await salas.guardarPerguntas(codigo, perguntas);
 
   await abrirPerguntaDaSala(codigo, 0);

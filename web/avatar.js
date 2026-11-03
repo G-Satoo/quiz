@@ -25,13 +25,14 @@ function semente(texto) {
 }
 
 /**
- * Devolve o <span> do avatar.
+ * Devolve o <span> do avatar: a foto, se a pessoa tiver uma
+ * aprovada; senão a inicial na cor do nome.
  *
  * [...nome][0] e não nome[0]: um nome que começa com emoji tem a
  * primeira "letra" ocupando dois caracteres em JavaScript, e
  * nome[0] cortaria o emoji ao meio.
  */
-export function montarAvatar(nome, classe = "avatar") {
+export function montarAvatar(nome, classe = "avatar", foto = null) {
   const avatar = document.createElement("span");
   avatar.className = classe;
 
@@ -39,6 +40,17 @@ export function montarAvatar(nome, classe = "avatar") {
   avatar.style.background = `linear-gradient(135deg, ${clara}, ${escura})`;
   avatar.textContent = [...nome.trim()][0]?.toUpperCase() ?? "?";
   avatar.setAttribute("aria-hidden", "true");
+
+  // Com foto (já aprovada pela moderação), ela cobre a inicial. Se
+  // não carregar, some e a inicial volta — nunca um ícone quebrado.
+  if (foto) {
+    const img = document.createElement("img");
+    img.src = foto;
+    img.alt = "";
+    img.loading = "lazy";
+    img.addEventListener("error", () => img.remove());
+    avatar.append(img);
+  }
 
   return avatar;
 }
