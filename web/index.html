@@ -288,7 +288,7 @@
 
 import { criarConexao, pintarEstado } from "./conexao.js";
 import { artePorCategoria, coresDaCategoria } from "./capas.js";
-import { montarAvatar } from "./avatar.js";
+import { fundoDoPerfil, montarAvatar } from "./avatar.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -392,7 +392,7 @@ function desenharConta() {
   perfil.className = "botao-perfil";
   perfil.title = eu.nome + " — ver perfil";
   perfil.setAttribute("aria-label", "Seu perfil");
-  perfil.append(montarAvatar(eu.nome, "avatar avatar-topo", eu.foto));
+  perfil.append(montarAvatar(eu.nome, "avatar avatar-topo", eu.foto, eu.cor));
 
   area.append(perfil);
 }
@@ -430,7 +430,7 @@ function linhaDoAutor(quiz, classeExtra = "") {
   const nome = quiz.meu ? "você" : quiz.autor;
   botao.title = quiz.meu ? "Você" : quiz.autor;
   botao.setAttribute("aria-label", `Perfil de ${nome}`);
-  botao.append(montarAvatar(quiz.autor, "avatar avatar-autor", quiz.autor_foto));
+  botao.append(montarAvatar(quiz.autor, "avatar avatar-autor", quiz.autor_foto, quiz.autor_cor));
 
   botao.addEventListener("click", (evento) => {
     // Senão o clique "atravessa" para o fechamento por clique fora.
@@ -520,13 +520,18 @@ async function abrirCartaoAutor(quiz, ancora) {
     // O usuário pode ter clicado em outro ícone enquanto carregava.
     if (ancoraDoCartao !== ancora) return;
 
-    const avatar = montarAvatar(usuario.nome, "avatar avatar-cartao", usuario.foto);
+    const avatar = montarAvatar(usuario.nome, "avatar avatar-cartao", usuario.foto, usuario.cor);
 
-    // A faixa do topo usa as cores do avatar: o cartão "veste" a
-    // cor da pessoa, a mesma que ela tem em todo o site.
+    // A faixa do topo é o banner do perfil da pessoa: a imagem de
+    // fundo que ela escolheu, ou a cor dela.
     const faixa = document.createElement("div");
     faixa.className = "faixa-cartao";
-    faixa.style.background = avatar.style.background;
+    faixa.style.background = fundoDoPerfil(usuario);
+
+    const bio = document.createElement("p");
+    bio.className = "bio-cartao";
+    bio.textContent = usuario.bio ?? "";
+    bio.hidden = !usuario.bio;
 
     const nome = document.createElement("strong");
     nome.className = "nome-cartao";
@@ -574,7 +579,7 @@ async function abrirCartaoAutor(quiz, ancora) {
 
     const corpo = document.createElement("div");
     corpo.className = "corpo-cartao";
-    corpo.append(avatar, nome, desde, numeros, extras, verPerfil);
+    corpo.append(avatar, nome, bio, desde, numeros, extras, verPerfil);
 
     caixa.replaceChildren(faixa, corpo);
     posicionarCartao();
@@ -1346,7 +1351,7 @@ function desenharJogador(jogador, posicao) {
   pontos.textContent = jogador.pontos.toLocaleString("pt-BR") + " pts";
 
   dados.append(nome, partidas, pontos);
-  cartao.append(selo, montarAvatar(jogador.nome, "avatar avatar-jogador", jogador.foto), dados);
+  cartao.append(selo, montarAvatar(jogador.nome, "avatar avatar-jogador", jogador.foto, jogador.cor), dados);
   return cartao;
 }
 

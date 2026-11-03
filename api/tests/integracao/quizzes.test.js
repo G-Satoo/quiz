@@ -811,6 +811,45 @@ describe("DELETE /api/quizzes/:id", () => {
     const { rows } = await pool.query("SELECT COUNT(*)::int AS total FROM alternativas");
     assert.equal(rows[0].total, 0);
   });
+
+  it("quiz do catálogo não se apaga: é do site, e o autor fica com o crédito", async () => {
+    const rascunho = await criarQuiz("Ainda meu");
+    const publicado = await criarQuiz("Já do site");
+    await publicar(publicado);
+
+    const { dados: meus } = await cliente.get("/api/quizzes?meus=1");
+    const doSite = Object.fromEntries(meus.quizzes.map((q) => [q.titulo, q.do_site]));
+    assert.deepEqual(doSite, { "Ainda meu": false, "Já do site": true });
+
+    const recusa = await cliente.delete(`/api/quizzes/${publicado.id}`);
+    assert.equal(recusa.status, 409);
+    assert.match(recusa.dados.erro, /duplique/);
+
+    const { dados: catalogo } = await cliente.get("/api/quizzes");
+    assert.deepEqual(catalogo.quizzes.map((q) => q.titulo), ["Já do site"]);
+
+    // O rascunho continua sendo dele para apagar.
+    assert.equal((await cliente.delete(`/api/quizzes/${rascunho.id}`)).status, 204);
+  });
+
+  it("apagar a conta leva os rascunhos, mas o quiz do catálogo fica, sem autor", async () => {
+    await criarQuiz("Rascunho");
+    const publicado = await criarQuiz("No catálogo");
+    await publicar(publicado);
+
+    await pool.query("DELETE FROM usuarios WHERE email = 'dono@exemplo.com'");
+
+    const { rows } = await pool.query("SELECT titulo, usuario_id FROM quizzes");
+    assert.deepEqual(rows, [{ titulo: "No catálogo", usuario_id: null }]);
+
+    cliente.esquecerCookie();
+    const { dados: catalogo } = await cliente.get("/api/quizzes");
+    assert.equal(catalogo.quizzes.length, 1);
+    assert.equal(catalogo.quizzes[0].autor, null);
+
+    const { status } = await cliente.get(`/api/quizzes/${publicado.id}`);
+    assert.equal(status, 200);
+  });
 });
 
 describe("moderação: só entra no catálogo o que foi aprovado", () => {
@@ -1406,5 +1445,67 @@ describe("foto de perfil", () => {
     assert.equal(dados.usuario.vitorias, 0);
     assert.deepEqual(dados.usuario.quiz_destaque, { id: quiz.id, titulo: "O mais acessado", acessos: 1 });
     assert.equal(dados.usuario.categoria_favorita, "geral");
+  });
+});
+
+describe("perfil editável", () => {
+  const png = (conteudo = "") => Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.alloc(16),
+    Buffer.from(conteudo)
+  ]);
+
+  async function enviarBanner(bytes) {
+    const resposta = await fetch(`${base}/api/usuarios/eu/banner`, {
+      method: "PUT",
+      headers: { "Content-Type": "image/png", Cookie: cliente.cookieAtual ?? "" },
+      body: bytes
+    });
+    return { status: resposta.status, dados: await resposta.json().catch(() => null) };
+  }
+
+  it("muda nome, bio e cor, e o perfil público mostra", async () => {
+    const resposta = await cliente.patch("/api/usuarios/eu", {
+      nome: "Novo Nome",
+      bio: "Gosto de quiz de história.",
+      cor: "roxo"
+    });
+    assert.equal(resposta.status, 200);
+
+    const { dados: eu } = await cliente.get("/api/usuarios/eu");
+    cliente.esquecerCookie();
+    const { dados } = await cliente.get(`/api/usuarios/${eu.usuario.id}`);
+
+    assert.equal(dados.usuario.nome, "Novo Nome");
+    assert.equal(dados.usuario.bio, "Gosto de quiz de história.");
+    assert.equal(dados.usuario.cor, "roxo");
+  });
+
+  it("nome ou bio impróprios não são gravados", async () => {
+    const resposta = await cliente.patch("/api/usuarios/eu", { bio: "olá [recusar]" });
+    assert.equal(resposta.status, 422);
+
+    const { dados } = await cliente.get("/api/usuarios/eu");
+    assert.equal(dados.usuario.bio, null);
+  });
+
+  it("recusa cor fora da lista e bio longa demais", async () => {
+    assert.equal((await cliente.patch("/api/usuarios/eu", { cor: "#ff00ff" })).status, 400);
+    assert.equal((await cliente.patch("/api/usuarios/eu", { bio: "x".repeat(201) })).status, 400);
+  });
+
+  it("o banner aprovado é servido; o recusado não troca o anterior", async () => {
+    const bom = await enviarBanner(png("fundo"));
+    assert.equal(bom.status, 200);
+
+    const ruim = await enviarBanner(png("[recusar]"));
+    assert.equal(ruim.status, 422);
+
+    const { dados } = await cliente.get("/api/usuarios/eu");
+    assert.equal(dados.usuario.banner, bom.dados.banner);
+
+    cliente.esquecerCookie();
+    const servido = await fetch(base + bom.dados.banner);
+    assert.equal(servido.status, 200);
   });
 });

@@ -57,7 +57,7 @@ router.get("/fila", async (req, res, next) => {
                   FROM perguntas p WHERE p.quiz_id = q.id
               ), '[]') AS perguntas
          FROM quizzes q
-         JOIN usuarios u ON u.id = q.usuario_id
+         LEFT JOIN usuarios u ON u.id = q.usuario_id
         WHERE q.situacao = 'revisao'
            OR EXISTS (SELECT 1 FROM denuncias d
                        WHERE d.quiz_id = q.id AND d.resolvida_em IS NULL)

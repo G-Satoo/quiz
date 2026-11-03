@@ -32,11 +32,12 @@ function semente(texto) {
  * primeira "letra" ocupando dois caracteres em JavaScript, e
  * nome[0] cortaria o emoji ao meio.
  */
-export function montarAvatar(nome, classe = "avatar", foto = null) {
+export function montarAvatar(nome, classe = "avatar", foto = null, cor = null) {
   const avatar = document.createElement("span");
   avatar.className = classe;
 
-  const [clara, escura] = CORES[semente(nome) % CORES.length];
+  // A cor escolhida no perfil manda; sem escolha, a que sai do nome.
+  const [clara, escura] = CORES_DO_PERFIL[cor] ?? CORES[semente(nome) % CORES.length];
   avatar.style.background = `linear-gradient(135deg, ${clara}, ${escura})`;
   avatar.textContent = [...nome.trim()][0]?.toUpperCase() ?? "?";
   avatar.setAttribute("aria-hidden", "true");
@@ -53,4 +54,21 @@ export function montarAvatar(nome, classe = "avatar", foto = null) {
   }
 
   return avatar;
+}
+
+// As mesmas cores, com os nomes que o perfil guarda (migração 016).
+// A ordem casa com CORES acima.
+const NOMES_DAS_CORES = ["azul", "verde", "laranja", "vermelho", "roxo", "ciano", "rosa", "amarelo"];
+export const CORES_DO_PERFIL = Object.fromEntries(NOMES_DAS_CORES.map((nome, i) => [nome, CORES[i]]));
+
+/**
+ * O fundo do topo do perfil (e da faixa do cartãozinho), em CSS.
+ *
+ * O banner, se a pessoa tiver um aprovado; senão a cor que ela
+ * escolheu; senão a cor que sai do nome — a mesma do avatar.
+ */
+export function fundoDoPerfil({ nome, cor, banner }) {
+  if (banner) return `center / cover no-repeat url("${banner}")`;
+  const [clara, escura] = CORES_DO_PERFIL[cor] ?? CORES[semente(nome) % CORES.length];
+  return `linear-gradient(135deg, ${clara}, ${escura})`;
 }

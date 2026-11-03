@@ -86,7 +86,7 @@ function desenharItem(quiz) {
   cabeca.append(titulo, selo);
 
   const meta = elemento("div", "meta-moderacao",
-    `por ${quiz.autor} · ${quiz.categoria}` +
+    `por ${quiz.autor ?? "conta removida"} · ${quiz.categoria}` +
     (quiz.moderacao_motivo ? ` · ${QUEM[quiz.moderacao_por] ?? quiz.moderacao_por}: ${quiz.moderacao_motivo}` : ""));
 
   cartao.append(cabeca, meta);

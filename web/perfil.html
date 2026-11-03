@@ -12,25 +12,68 @@
     <a href="index.html" style="font-size:13px">← Catálogo</a>
   </div>
 
+  <!--
+    Editar perfil. Tudo aqui é público, então tudo passa pela IA
+    antes de aparecer: nome e bio ao salvar, foto e imagem de fundo
+    ao enviar. A cor é uma das do site, de uma lista fechada.
+  -->
+  <dialog id="janela-editar" class="janela janela-perfil">
+    <form id="formulario-perfil" method="dialog">
+      <div class="cabeca-janela">
+        <h2>Editar perfil</h2>
+        <button type="button" class="discreto icone" id="fechar-editar" aria-label="Fechar">✕</button>
+      </div>
+      <p class="dica-campo">Tudo aqui aparece para todo mundo, e passa pela moderação antes.</p>
+
+      <label>Imagem de fundo</label>
+      <div class="previa-banner" id="previa-banner"></div>
+      <div class="acoes-foto">
+        <input type="file" id="arquivo-banner" accept="image/png,image/jpeg,image/webp" class="escondido">
+        <button type="button" class="discreto" id="botao-banner">Trocar imagem</button>
+        <button type="button" class="discreto escondido" id="botao-tirar-banner">Remover</button>
+        <span class="retorno-foto" id="retorno-banner"></span>
+      </div>
+
+      <label>Foto</label>
+      <div class="acoes-foto" id="acoes-foto">
+        <input type="file" id="arquivo-foto" accept="image/png,image/jpeg,image/webp" class="escondido">
+        <button type="button" class="discreto" id="botao-foto">Trocar foto</button>
+        <button type="button" class="discreto escondido" id="botao-tirar-foto">Remover</button>
+        <span class="retorno-foto" id="retorno-foto"></span>
+      </div>
+
+      <label for="campo-nome">Nome</label>
+      <input id="campo-nome" maxlength="80" required>
+
+      <label for="campo-bio">Bio <span class="contador-bio" id="contador-bio"></span></label>
+      <textarea id="campo-bio" maxlength="200" rows="3"
+                placeholder="Uma frase sobre você. Ex.: fã de anime e de história."></textarea>
+
+      <label>Cor do perfil</label>
+      <div class="cores-perfil" id="cores-perfil" role="radiogroup" aria-label="Cor do perfil"></div>
+
+      <div id="erro-perfil" class="erro escondido"></div>
+      <button type="submit" class="largo" id="botao-salvar-perfil">Salvar</button>
+    </form>
+  </dialog>
+
   <div class="conteudo">
     <div id="erro" class="erro escondido"></div>
 
     <section id="perfil" class="escondido">
+      <!-- O topo é da pessoa: a imagem de fundo que ela escolheu, ou
+           a cor dela. Ver fundoDoPerfil, em avatar.js. -->
+      <div class="banner-perfil" id="banner-perfil"></div>
+
       <div class="cabeca-perfil">
         <span id="lugar-avatar"></span>
         <div class="identidade-perfil">
           <h1 id="nome"></h1>
+          <p class="bio-perfil escondido" id="bio"></p>
           <div class="subtitulo" id="email"></div>
           <div class="desde-perfil" id="desde"></div>
-
-          <!-- Só no seu perfil. A foto passa pela IA antes de aparecer. -->
-          <div class="acoes-foto escondido" id="acoes-foto">
-            <input type="file" id="arquivo-foto" accept="image/png,image/jpeg,image/webp" class="escondido">
-            <button type="button" class="discreto" id="botao-foto">Trocar foto</button>
-            <button type="button" class="discreto escondido" id="botao-tirar-foto">Remover</button>
-            <span class="retorno-foto" id="retorno-foto"></span>
-          </div>
         </div>
+        <button type="button" class="discreto escondido" id="botao-editar-perfil">Editar perfil</button>
       </div>
 
       <!-- Só no perfil público: o quiz mais acessado e onde a pessoa mais cria. -->
@@ -87,7 +130,7 @@
 // catálogo — que é público e tem o "Entrar".
 // ============================================================
 
-import { montarAvatar } from "./avatar.js";
+import { CORES_DO_PERFIL, fundoDoPerfil, montarAvatar } from "./avatar.js";
 import { artePorCategoria } from "./capas.js";
 
 const $ = (id) => document.getElementById(id);
@@ -138,9 +181,10 @@ async function mostrarPublico() {
     ]);
 
     document.title = `${usuario.nome} — Quiz`;
-    $("lugar-avatar").replaceWith(montarAvatar(usuario.nome, "avatar avatar-perfil", usuario.foto));
+    $("lugar-avatar").replaceWith(montarAvatar(usuario.nome, "avatar avatar-perfil", usuario.foto, usuario.cor));
     $("nome").textContent = usuario.nome;
     $("email").classList.add("escondido");
+    desenharTopo(usuario);
     $("desde").textContent = "no quiz desde " +
       new Date(usuario.criado_em).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
 
@@ -201,8 +245,18 @@ async function mostrarPublico() {
 let avatarAtual = null;
 let nomeDoPerfil = "";
 
+let perfilAtual = null;
+
+/** O banner e a bio — de quem quer que seja o perfil aberto. */
+function desenharTopo({ nome, bio, cor, banner }) {
+  $("banner-perfil").style.background = fundoDoPerfil({ nome, cor, banner });
+  $("bio").textContent = bio ?? ""; // texto, nunca innerHTML
+  $("bio").classList.toggle("escondido", !bio);
+}
+
 function trocarAvatar(foto) {
-  const novo = montarAvatar(nomeDoPerfil, "avatar avatar-perfil", foto);
+  if (perfilAtual) perfilAtual.foto = foto;
+  const novo = montarAvatar(nomeDoPerfil, "avatar avatar-perfil", foto, perfilAtual?.cor);
   avatarAtual.replaceWith(novo);
   avatarAtual = novo;
   $("botao-tirar-foto").classList.toggle("escondido", !foto);
@@ -276,6 +330,157 @@ $("botao-tirar-foto").addEventListener("click", async () => {
   $("retorno-foto").textContent = "";
 });
 
+// ----- Editar perfil -----
+
+const janelaEditar = $("janela-editar");
+let corEscolhida = null;
+
+function desenharCores() {
+  const caixa = $("cores-perfil");
+  caixa.replaceChildren();
+
+  for (const [nome, [clara, escura]] of Object.entries(CORES_DO_PERFIL)) {
+    const opcao = document.createElement("button");
+    opcao.type = "button";
+    opcao.className = "cor-perfil" + (nome === corEscolhida ? " escolhida" : "");
+    opcao.style.background = `linear-gradient(135deg, ${clara}, ${escura})`;
+    opcao.title = nome;
+    opcao.setAttribute("role", "radio");
+    opcao.setAttribute("aria-checked", String(nome === corEscolhida));
+    opcao.setAttribute("aria-label", nome);
+    opcao.addEventListener("click", () => {
+      corEscolhida = nome;
+      desenharCores();
+      $("previa-banner").style.background = fundoDoPerfil({ ...perfilAtual, cor: corEscolhida });
+    });
+    caixa.append(opcao);
+  }
+}
+
+function contarBio() {
+  $("contador-bio").textContent = `${$("campo-bio").value.length}/200`;
+}
+
+$("botao-editar-perfil").addEventListener("click", () => {
+  $("campo-nome").value = perfilAtual.nome;
+  $("campo-bio").value = perfilAtual.bio ?? "";
+  corEscolhida = perfilAtual.cor;
+  contarBio();
+  desenharCores();
+  $("previa-banner").style.background = fundoDoPerfil(perfilAtual);
+  $("botao-tirar-banner").classList.toggle("escondido", !perfilAtual.banner);
+  $("botao-tirar-foto").classList.toggle("escondido", !perfilAtual.foto);
+  $("erro-perfil").classList.add("escondido");
+  $("retorno-banner").textContent = "";
+  $("retorno-foto").textContent = "";
+  janelaEditar.showModal();
+});
+
+$("fechar-editar").addEventListener("click", () => janelaEditar.close());
+$("campo-bio").addEventListener("input", contarBio);
+
+$("formulario-perfil").addEventListener("submit", async (evento) => {
+  evento.preventDefault();
+  const botao = $("botao-salvar-perfil");
+  botao.disabled = true;
+  botao.textContent = "Analisando…";
+  $("erro-perfil").classList.add("escondido");
+
+  try {
+    const resposta = await fetch("/api/usuarios/eu", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        nome: $("campo-nome").value,
+        bio: $("campo-bio").value,
+        cor: corEscolhida
+      })
+    });
+    const dados = await resposta.json().catch(() => null);
+    if (!resposta.ok) throw new Error(dados?.erro ?? "Não consegui salvar");
+
+    Object.assign(perfilAtual, dados.usuario);
+    nomeDoPerfil = dados.usuario.nome;
+    $("nome").textContent = dados.usuario.nome;
+    trocarAvatar(perfilAtual.foto); // a inicial sai do nome; a cor, da escolhida
+    desenharTopo(perfilAtual);
+    janelaEditar.close();
+  } catch (erro) {
+    $("erro-perfil").textContent = erro.message;
+    $("erro-perfil").classList.remove("escondido");
+  } finally {
+    botao.disabled = false;
+    botao.textContent = "Salvar";
+  }
+});
+
+/**
+ * Recorta no centro em 3:1 e reduz a 1200x400, no navegador — o
+ * formato do topo do perfil. Mesma ideia da capa e da foto.
+ */
+async function prepararBanner(arquivo) {
+  const imagem = await createImageBitmap(arquivo);
+  const escala = Math.max(1200 / imagem.width, 400 / imagem.height);
+  const largura = imagem.width * escala;
+  const altura = imagem.height * escala;
+
+  const tela = document.createElement("canvas");
+  tela.width = 1200;
+  tela.height = 400;
+  tela.getContext("2d").drawImage(imagem, (1200 - largura) / 2, (400 - altura) / 2, largura, altura);
+  imagem.close();
+
+  const gerar = (tipo) => new Promise((resolver) => tela.toBlob(resolver, tipo, 0.85));
+  const webp = await gerar("image/webp");
+  return webp?.type === "image/webp" ? webp : gerar("image/jpeg");
+}
+
+$("botao-banner").addEventListener("click", () => $("arquivo-banner").click());
+
+$("arquivo-banner").addEventListener("change", async () => {
+  const arquivo = $("arquivo-banner").files[0];
+  $("arquivo-banner").value = "";
+  if (!arquivo) return;
+
+  const retorno = $("retorno-banner");
+  retorno.className = "retorno-foto";
+  $("botao-banner").disabled = true;
+
+  try {
+    const blob = await prepararBanner(arquivo);
+    retorno.textContent = "Analisando a imagem…";
+
+    const resposta = await fetch("/api/usuarios/eu/banner", {
+      method: "PUT",
+      headers: { "Content-Type": blob.type },
+      body: blob
+    });
+    const dados = await resposta.json().catch(() => null);
+    if (!resposta.ok) throw new Error(dados?.erro ?? "Não consegui enviar a imagem");
+
+    perfilAtual.banner = dados.banner;
+    desenharTopo(perfilAtual);
+    $("previa-banner").style.background = fundoDoPerfil(perfilAtual);
+    $("botao-tirar-banner").classList.remove("escondido");
+    retorno.textContent = "Imagem aprovada.";
+    retorno.classList.add("ok");
+  } catch (erro) {
+    retorno.textContent = erro.message === "Failed to fetch" ? "Não consegui falar com o servidor." : erro.message;
+    retorno.classList.add("falhou");
+  } finally {
+    $("botao-banner").disabled = false;
+  }
+});
+
+$("botao-tirar-banner").addEventListener("click", async () => {
+  await fetch("/api/usuarios/eu/banner", { method: "DELETE" });
+  perfilAtual.banner = null;
+  desenharTopo(perfilAtual);
+  $("previa-banner").style.background = fundoDoPerfil({ ...perfilAtual, cor: corEscolhida });
+  $("botao-tirar-banner").classList.add("escondido");
+  $("retorno-banner").textContent = "";
+});
+
 if (idPublico) await mostrarPublico();
 else try {
   // As duas ao mesmo tempo: nenhuma depende da outra.
@@ -284,10 +489,12 @@ else try {
     pedir("GET", "/api/quizzes?meus=1")
   ]);
 
-  avatarAtual = montarAvatar(perfil.nome, "avatar avatar-perfil", perfil.foto);
+  avatarAtual = montarAvatar(perfil.nome, "avatar avatar-perfil", perfil.foto, perfil.cor);
   $("lugar-avatar").replaceWith(avatarAtual);
   nomeDoPerfil = perfil.nome;
-  $("acoes-foto").classList.remove("escondido");
+  perfilAtual = { nome: perfil.nome, bio: perfil.bio, cor: perfil.cor, banner: perfil.banner, foto: perfil.foto };
+  desenharTopo(perfilAtual);
+  $("botao-editar-perfil").classList.remove("escondido");
   $("botao-tirar-foto").classList.toggle("escondido", !perfil.foto);
   $("nome").textContent = perfil.nome;
   $("email").textContent = perfil.email;
@@ -390,6 +597,31 @@ function desenharMeu(quiz, { publico = false } = {}) {
   });
 
   acoes.append(abrir, duplicar);
+
+  // Apagar só o que ainda é seu. O que entrou no catálogo é do
+  // site — quem jogou conta com ele —, e fica com você de autor.
+  if (!publico && quiz.do_site === false) {
+    const apagar = document.createElement("button");
+    apagar.type = "button";
+    apagar.className = "botao-acao discreto botao-apagar";
+    apagar.title = "Apagar rascunho";
+    apagar.setAttribute("aria-label", `Apagar ${quiz.titulo}`);
+    apagar.textContent = "Apagar";
+    apagar.addEventListener("click", async () => {
+      if (!confirm(`Apagar "${quiz.titulo}"? Não dá para desfazer.`)) return;
+      apagar.disabled = true;
+      try {
+        await pedir("DELETE", `/api/quizzes/${quiz.id}`);
+        cartao.remove();
+      } catch (erro) {
+        apagar.disabled = false;
+        $("erro").textContent = erro.message;
+        $("erro").classList.remove("escondido");
+      }
+    });
+    acoes.append(apagar);
+  }
+
   cartao.append(capa, titulo, meta, acoes);
   return cartao;
 }

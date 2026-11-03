@@ -33,7 +33,7 @@ const router = Router();
 router.get("/hoje", async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      `SELECT u.nome,
+      `SELECT u.nome, u.cor,
               (SELECT '/api/usuarios/' || f.usuario_id || '/foto?v=' || floor(extract(epoch FROM f.enviada_em))::bigint
                  FROM fotos_perfil f WHERE f.usuario_id = u.id) AS foto,
               SUM(r.pontos)::int AS pontos,

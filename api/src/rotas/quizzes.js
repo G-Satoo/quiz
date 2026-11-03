@@ -136,16 +136,18 @@ router.get("/", async (req, res, next) => {
               (SELECT COUNT(*) FROM avaliacoes v
                  JOIN resultados r USING (sala, jogador_id)
                 WHERE v.quiz_id = q.id AND r.vale_ranking)::int AS avaliacoes,
-              u.nome AS autor, u.id AS autor_id,
+              u.nome AS autor, u.id AS autor_id, u.cor AS autor_cor,
               (SELECT '/api/usuarios/' || f.usuario_id || '/foto?v=' || floor(extract(epoch FROM f.enviada_em))::bigint
                  FROM fotos_perfil f WHERE f.usuario_id = u.id) AS autor_foto,
               (q.usuario_id = $1) AS meu,
               q.situacao,
+              -- Só faz sentido para o dono: pode apagar, ou já é do site?
+              CASE WHEN q.usuario_id = $1 THEN quiz_e_do_site(q.id) END AS do_site,
               -- O motivo de uma recusa é conversa entre a moderação
               -- e o dono; não vai para a listagem de mais ninguém.
               CASE WHEN q.usuario_id = $1 THEN q.moderacao_motivo END AS moderacao_motivo
          FROM quizzes q
-         JOIN usuarios u ON u.id = q.usuario_id
+         LEFT JOIN usuarios u ON u.id = q.usuario_id
          LEFT JOIN capas c ON c.quiz_id = q.id
         WHERE (CASE WHEN $3::bool THEN q.usuario_id = $1
                     ELSE q.situacao = 'publicado' END)
@@ -192,13 +194,13 @@ router.get("/:id", async (req, res, next) => {
               (SELECT COUNT(*) FROM avaliacoes v
                  JOIN resultados r USING (sala, jogador_id)
                 WHERE v.quiz_id = q.id AND r.vale_ranking)::int AS avaliacoes,
-              u.nome AS autor, u.id AS autor_id,
+              u.nome AS autor, u.id AS autor_id, u.cor AS autor_cor,
               (SELECT '/api/usuarios/' || f.usuario_id || '/foto?v=' || floor(extract(epoch FROM f.enviada_em))::bigint
                  FROM fotos_perfil f WHERE f.usuario_id = u.id) AS autor_foto,
               (q.usuario_id = $2) AS meu,
               q.situacao, q.moderacao_motivo
          FROM quizzes q
-         JOIN usuarios u ON u.id = q.usuario_id
+         LEFT JOIN usuarios u ON u.id = q.usuario_id
          LEFT JOIN capas c ON c.quiz_id = q.id
         WHERE q.id = $1`,
       [id, req.usuarioId]
@@ -984,17 +986,33 @@ router.delete("/:id/capa", exigirLogin, async (req, res, next) => {
  *
  * As perguntas e alternativas vão junto, pelo ON DELETE CASCADE.
  */
+const MENSAGEM_DO_SITE =
+  "Este quiz já faz parte do catálogo, e quem jogou conta com ele: ele continua no site com o seu nome como autor. " +
+  "Para mudar alguma coisa, duplique.";
+
 router.delete("/:id", exigirLogin, async (req, res, next) => {
   try {
     const id = lerId(req.params.id);
     if (id === null) return res.status(400).json({ erro: "Id inválido" });
 
-    const { rowCount } = await pool.query(
-      "DELETE FROM quizzes WHERE id = $1 AND usuario_id = $2",
+    // Quiz que entrou no catálogo é do site (migração 017): apagar
+    // levaria junto partidas, notas e pontos de quem jogou. O autor
+    // pode duplicar, bloquear perguntas, pedir revisão — apagar, não.
+    const { rows } = await pool.query(
+      `DELETE FROM quizzes
+        WHERE id = $1 AND usuario_id = $2 AND NOT quiz_e_do_site(id)
+        RETURNING id`,
       [id, req.usuarioId]
     );
 
-    if (rowCount === 0) return res.status(404).json({ erro: "Quiz não encontrado" });
+    if (rows.length === 0) {
+      const { rows: existe } = await pool.query(
+        "SELECT 1 FROM quizzes WHERE id = $1 AND usuario_id = $2",
+        [id, req.usuarioId]
+      );
+      if (existe.length === 0) return res.status(404).json({ erro: "Quiz não encontrado" });
+      return res.status(409).json({ erro: MENSAGEM_DO_SITE });
+    }
 
     res.status(204).end();
   } catch (erro) {

@@ -13,7 +13,7 @@ import { gerarHash } from "../servicos/senha.js";
 import { criarSessao, NOME_COOKIE, opcoesCookie } from "../servicos/sessao.js";
 import { limitar } from "../middlewares/limite.js";
 import { exigirLogin } from "../middlewares/autenticacao.js";
-import { ErroIA, moderarFoto } from "../servicos/ia.js";
+import { ErroIA, moderarBanner, moderarFoto, moderarTextoPerfil } from "../servicos/ia.js";
 import { tipoPelosBytes } from "../servicos/capa.js";
 import { lerInteiro, validarEmail, validarNome, validarSenha } from "../util/validacao.js";
 
@@ -68,7 +68,9 @@ router.post(
 router.get("/eu", exigirLogin, async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      `SELECT u.id, u.nome, u.email, u.criado_em, u.admin,
+      `SELECT u.id, u.nome, u.email, u.criado_em, u.admin, u.bio, u.cor,
+              (SELECT '/api/usuarios/' || b.usuario_id || '/banner?v=' || floor(extract(epoch FROM b.enviada_em))::bigint
+                 FROM banners_perfil b WHERE b.usuario_id = u.id) AS banner,
               (SELECT '/api/usuarios/' || f.usuario_id || '/foto?v=' || floor(extract(epoch FROM f.enviada_em))::bigint
                  FROM fotos_perfil f WHERE f.usuario_id = u.id) AS foto
          FROM usuarios u WHERE u.id = $1`,
@@ -98,7 +100,9 @@ router.get("/eu", exigirLogin, async (req, res, next) => {
 router.get("/eu/perfil", exigirLogin, async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      `SELECT u.id, u.nome, u.email, u.criado_em, u.admin,
+      `SELECT u.id, u.nome, u.email, u.criado_em, u.admin, u.bio, u.cor,
+              (SELECT '/api/usuarios/' || b.usuario_id || '/banner?v=' || floor(extract(epoch FROM b.enviada_em))::bigint
+                 FROM banners_perfil b WHERE b.usuario_id = u.id) AS banner,
               (SELECT '/api/usuarios/' || f.usuario_id || '/foto?v=' || floor(extract(epoch FROM f.enviada_em))::bigint
                  FROM fotos_perfil f WHERE f.usuario_id = u.id) AS foto,
               (SELECT COUNT(*) FROM quizzes q WHERE q.usuario_id = u.id)::int AS quizzes,
@@ -136,6 +140,151 @@ router.get("/eu/perfil", exigirLogin, async (req, res, next) => {
  * Vem depois das rotas /eu de propósito: o Express testa na ordem,
  * e "/:id" na frente engoliria "/eu" como se fosse um id.
  */
+// ------------------------------------------------------------
+// Perfil editável: nome, bio, cor e banner
+// ------------------------------------------------------------
+
+// As cores do site, por nome. As mesmas do CHECK da migração 016.
+const CORES_PERFIL = ["azul", "verde", "laranja", "vermelho", "roxo", "ciano", "rosa", "amarelo"];
+
+/**
+ * PATCH /api/usuarios/eu
+ * body: { nome?, bio?, cor? }
+ *
+ * Nome e bio são públicos (catálogo, ranking, perfil): se mudaram,
+ * passam pela IA antes de gravar. A cor não precisa — é uma das do
+ * site, escolhida de uma lista fechada.
+ */
+router.patch("/eu", exigirLogin, async (req, res, next) => {
+  try {
+    const { nome, bio, cor } = req.body ?? {};
+
+    if (nome !== undefined) {
+      const erro = validarNome(nome);
+      if (erro) return res.status(400).json({ erro });
+    }
+    if (bio !== undefined && bio !== null && (typeof bio !== "string" || bio.trim().length > 200)) {
+      return res.status(400).json({ erro: "A bio pode ter no máximo 200 caracteres" });
+    }
+    if (cor !== undefined && cor !== null && !CORES_PERFIL.includes(cor)) {
+      return res.status(400).json({ erro: "Cor inválida" });
+    }
+
+    const { rows: atuais } = await pool.query("SELECT nome, bio FROM usuarios WHERE id = $1", [req.usuarioId]);
+    const atual = atuais[0];
+
+    const novoNome = nome === undefined ? atual.nome : nome.trim();
+    const novaBio = bio === undefined ? atual.bio : (bio?.trim() || null);
+
+    // Só gasta IA com texto novo. Apagar a bio não precisa de análise
+    // (e não pode ficar travado se a IA estiver fora do ar).
+    if (novoNome !== atual.nome || (novaBio !== null && novaBio !== atual.bio)) {
+      let veredito;
+      try {
+        veredito = await moderarTextoPerfil({ nome: novoNome, bio: novaBio });
+      } catch (erro) {
+        if (!(erro instanceof ErroIA)) throw erro;
+        return res.status(erro.codigo === "cota" ? 429 : 503).json({ erro: erro.message });
+      }
+
+      if (!veredito.aprovada) {
+        return res.status(422).json({ erro: `Não deu para salvar: ${veredito.motivo}` });
+      }
+    }
+
+    const { rows } = await pool.query(
+      `UPDATE usuarios
+          SET nome = $2, bio = $3, cor = CASE WHEN $4::bool THEN $5 ELSE cor END
+        WHERE id = $1
+        RETURNING id, nome, bio, cor`,
+      [req.usuarioId, novoNome, novaBio, cor !== undefined, cor ?? null]
+    );
+
+    res.json({ usuario: rows[0] });
+  } catch (erro) {
+    next(erro);
+  }
+});
+
+/**
+ * PUT /api/usuarios/eu/banner
+ * corpo: a imagem (PNG, JPEG ou WEBP)
+ *
+ * A imagem de fundo do topo do perfil. Mesmo caminho da foto: a IA
+ * olha antes, e só o aprovado é gravado.
+ */
+router.put(
+  "/eu/banner",
+  exigirLogin,
+  limitar({ nome: "banner", max: 10, janela: 60 * 60, chave: (req) => req.usuarioId }),
+  express.raw({ type: ["image/png", "image/jpeg", "image/webp"], limit: 1024 * 1024 }),
+  async (req, res, next) => {
+    try {
+      const bytes = req.body;
+      if (!Buffer.isBuffer(bytes) || bytes.length === 0) {
+        return res.status(400).json({ erro: "Envie a imagem como PNG, JPEG ou WEBP" });
+      }
+
+      const tipo = tipoPelosBytes(bytes);
+      if (!tipo) return res.status(400).json({ erro: "O arquivo não é uma imagem PNG, JPEG ou WEBP" });
+
+      let veredito;
+      try {
+        veredito = await moderarBanner({ tipo, bytes });
+      } catch (erro) {
+        if (!(erro instanceof ErroIA)) throw erro;
+        return res.status(erro.codigo === "cota" ? 429 : 503).json({ erro: erro.message });
+      }
+
+      if (!veredito.aprovada) {
+        return res.status(422).json({ erro: `A imagem não foi aceita: ${veredito.motivo}` });
+      }
+
+      const { rows } = await pool.query(
+        `INSERT INTO banners_perfil (usuario_id, tipo, bytes) VALUES ($1, $2, $3)
+         ON CONFLICT (usuario_id) DO UPDATE
+           SET tipo = EXCLUDED.tipo, bytes = EXCLUDED.bytes, enviada_em = now()
+         RETURNING '/api/usuarios/' || usuario_id || '/banner?v=' || floor(extract(epoch FROM enviada_em))::bigint AS banner`,
+        [req.usuarioId, tipo, bytes]
+      );
+
+      res.json({ banner: rows[0].banner });
+    } catch (erro) {
+      next(erro);
+    }
+  }
+);
+
+/** DELETE /api/usuarios/eu/banner — volta para a cor do perfil. */
+router.delete("/eu/banner", exigirLogin, async (req, res, next) => {
+  try {
+    await pool.query("DELETE FROM banners_perfil WHERE usuario_id = $1", [req.usuarioId]);
+    res.status(204).end();
+  } catch (erro) {
+    next(erro);
+  }
+});
+
+/** GET /api/usuarios/:id/banner — público, como o perfil. */
+router.get("/:id/banner", async (req, res, next) => {
+  try {
+    const id = lerInteiro(req.params.id, { padrao: null, minimo: 1, maximo: 2147483647 });
+    if (id === null) return res.status(404).json({ erro: "Imagem não encontrada" });
+
+    const { rows } = await pool.query("SELECT tipo, bytes FROM banners_perfil WHERE usuario_id = $1", [id]);
+    if (rows.length === 0) return res.status(404).json({ erro: "Imagem não encontrada" });
+
+    res.set({
+      "Content-Type": rows[0].tipo,
+      "X-Content-Type-Options": "nosniff",
+      "Cache-Control": "public, max-age=86400"
+    });
+    res.send(rows[0].bytes);
+  } catch (erro) {
+    next(erro);
+  }
+});
+
 /**
  * PUT /api/usuarios/eu/foto
  * corpo: a imagem (PNG, JPEG ou WEBP)
@@ -232,7 +381,9 @@ router.get("/:id", async (req, res, next) => {
     if (id === null) return res.status(404).json({ erro: "Pessoa não encontrada" });
 
     const { rows } = await pool.query(
-      `SELECT u.id, u.nome, u.criado_em,
+      `SELECT u.id, u.nome, u.criado_em, u.bio, u.cor,
+              (SELECT '/api/usuarios/' || b.usuario_id || '/banner?v=' || floor(extract(epoch FROM b.enviada_em))::bigint
+                 FROM banners_perfil b WHERE b.usuario_id = u.id) AS banner,
               (SELECT COUNT(*) FROM quizzes q
                 WHERE q.usuario_id = u.id AND q.situacao = 'publicado')::int AS quizzes,
               (SELECT COALESCE(SUM(q.partidas), 0) FROM quizzes q
