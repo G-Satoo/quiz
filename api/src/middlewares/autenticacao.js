@@ -7,6 +7,7 @@
 // um endpoint aberto por acidente.
 // ============================================================
 
+import { pool } from "../../db/pool.js";
 import { lerSessao, NOME_COOKIE } from "../servicos/sessao.js";
 
 /**
@@ -44,6 +45,28 @@ export async function loginOpcional(req, res, next) {
   try {
     const token = req.cookies?.[NOME_COOKIE];
     req.usuarioId = (await lerSessao(token)) || null;
+    next();
+  } catch (erro) {
+    next(erro);
+  }
+}
+
+/**
+ * Exige que quem está logado seja administrador. Vem DEPOIS de
+ * exigirLogin, que já resolveu quem é.
+ *
+ * Consulta o banco a cada pedido em vez de guardar o papel na
+ * sessão: tirar o papel de alguém tem que valer na hora, não só
+ * quando a sessão dele expirar.
+ */
+export async function exigirAdmin(req, res, next) {
+  try {
+    const { rows } = await pool.query("SELECT admin FROM usuarios WHERE id = $1", [req.usuarioId]);
+
+    if (!rows[0]?.admin) {
+      return res.status(403).json({ erro: "Só administradores podem fazer isso" });
+    }
+
     next();
   } catch (erro) {
     next(erro);

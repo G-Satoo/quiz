@@ -83,7 +83,7 @@ function enchimento(quantas) {
  * Tempo curto (5 segundos, o mínimo que o banco aceita) para o
  * teste do tempo esgotado não demorar meio minuto.
  */
-async function prepararPartida() {
+async function prepararPartida({ publicar = true } = {}) {
   const { dados: criado } = await cliente.post("/api/quizzes", {
     titulo: "Geografia",
     perguntas: [
@@ -107,6 +107,13 @@ async function prepararPartida() {
       ...enchimento(TOTAL - 2)
     ]
   });
+
+  // Publicado por padrão: é o caso em que a partida vale ranking
+  // e nota. O teste de rascunho pede { publicar: false }.
+  if (publicar) {
+    const { dados: aprovacao } = await cliente.post(`/api/quizzes/${criado.quiz.id}/publicar`);
+    assert.equal(aprovacao.quiz.situacao, "publicado");
+  }
 
   const { dados } = await cliente.post("/api/salas", { quiz_id: criado.quiz.id });
   const cookie = cliente.cookieAtual;
@@ -573,5 +580,40 @@ describe("fechamento da pergunta", () => {
     for (const linha of resultado.placar) {
       assert.ok(linha.pontos <= 1000, `${linha.apelido} ficou com ${linha.pontos}`);
     }
+  });
+});
+
+describe("partida de rascunho", () => {
+  it("joga normalmente, mas não vale ranking nem nota", async () => {
+    // Senão o dono jogaria o próprio rascunho sabendo as respostas
+    // e o publicaria depois, já com pontos e nota 5.
+    const hostCookie = cliente.cookieAtual;
+    await cliente.post("/api/usuarios", {
+      nome: "Amiga",
+      email: "amiga@exemplo.com",
+      senha: "uma-senha-boa"
+    });
+    const amigaCookie = cliente.cookieAtual;
+    cliente.definirCookie(hostCookie);
+
+    const { codigo, host } = await prepararPartida({ publicar: false });
+
+    const amiga = await abrir({ cookie: amigaCookie });
+    amiga.enviar({ tipo: "entrar", codigo, apelido: "Amiga" });
+    await amiga.esperar("bem-vindo");
+
+    const fim = await jogarAteOFim(host, [amiga]);
+    assert.ok(fim.placar[0].pontos > 0, "a partida em si funciona");
+
+    amiga.enviar({ tipo: "avaliar", nota: 5 });
+    await amiga.esperar("avaliacao-recebida");
+
+    cliente.esquecerCookie();
+    const { dados } = await cliente.get("/api/ranking/hoje");
+    assert.deepEqual(dados.jogadores, []);
+
+    cliente.definirCookie(hostCookie);
+    const { dados: meus } = await cliente.get("/api/quizzes?meus=1");
+    assert.equal(meus.quizzes[0].avaliacoes, 0);
   });
 });

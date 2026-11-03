@@ -301,8 +301,13 @@ export async function gravarResultados(codigo, quizId, placar, contas = {}) {
   }));
 
   await pool.query(
-    `INSERT INTO resultados (quiz_id, sala, jogador_id, apelido, pontos, posicao, usuario_id)
-     SELECT $1, $2, x.id, x.apelido, x.pontos, x.posicao, x.usuario_id
+    // vale_ranking é decidido AGORA, pela situação do quiz no fim
+    // da partida. Jogar o próprio rascunho sabendo as respostas e
+    // só depois publicá-lo não transforma aquelas partidas em pontos.
+    `INSERT INTO resultados
+       (quiz_id, sala, jogador_id, apelido, pontos, posicao, usuario_id, vale_ranking)
+     SELECT $1, $2, x.id, x.apelido, x.pontos, x.posicao, x.usuario_id,
+            COALESCE((SELECT situacao = 'publicado' FROM quizzes WHERE id = $1), FALSE)
        FROM jsonb_to_recordset($3::jsonb)
          AS x(id text, apelido text, pontos int, posicao int, usuario_id int)
      ON CONFLICT (sala, jogador_id) DO NOTHING`,

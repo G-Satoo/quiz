@@ -32,6 +32,7 @@ import rotasQuizzes from "./rotas/quizzes.js";
 import rotasSalas from "./rotas/salas.js";
 import rotasGeracao from "./rotas/geracao.js";
 import rotasRanking from "./rotas/ranking.js";
+import rotasModeracao from "./rotas/moderacao.js";
 import { pendurarWebSocket } from "./tempo-real/servidor-ws.js";
 
 export const app = express();
@@ -92,6 +93,7 @@ app.use("/api/quizzes", rotasQuizzes);
 app.use("/api/salas", rotasSalas);
 app.use("/api/geracao", rotasGeracao);
 app.use("/api/ranking", rotasRanking);
+app.use("/api/moderacao", rotasModeracao);
 
 // As telas são servidas pela própria API, e não por um servidor
 // separado. Isso faz a conexão WebSocket ser de MESMA ORIGEM, o
@@ -112,10 +114,20 @@ app.use((req, res) => {
 // Middleware de erro tem 4 parâmetros. É assim que o Express o
 // reconhece. Qualquer erro lançado nas rotas cai aqui.
 app.use((erro, req, res, next) => {
-  console.error("Erro não tratado:", erro);
-
   if (res.headersSent) return;
 
+  // Erros de quem chamou, que o leitor de corpo (express.json e
+  // express.raw) marca com um tipo. Antes caíam no 500 abaixo, e
+  // uma capa grande demais aparecia como "erro interno" — culpando
+  // o servidor por algo que a pessoa pode corrigir.
+  if (erro.type === "entity.too.large") {
+    return res.status(413).json({ erro: "O arquivo ou o conteúdo enviado é grande demais" });
+  }
+  if (erro.type === "entity.parse.failed") {
+    return res.status(400).json({ erro: "O conteúdo enviado está malformado" });
+  }
+
+  console.error("Erro não tratado:", erro);
   res.status(500).json({ erro: "Erro interno do servidor" });
 });
 

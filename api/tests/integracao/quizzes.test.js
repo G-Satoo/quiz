@@ -13,15 +13,17 @@ import assert from "node:assert/strict";
 
 import { prepararBanco, limpar, encerrarConexoes } from "../ajuda/banco.js";
 import { MIN_PERGUNTAS } from "../../src/util/validacao.js";
+import { analisarComIA, carregarParaModeracao, LIMITE_DENUNCIAS } from "../../src/servicos/moderacao.js";
 import { subirServidor } from "../ajuda/servidor.js";
 import { pool } from "../../db/pool.js";
 
 let servidor;
 let cliente;
+let base;
 
 before(async () => {
   await prepararBanco();
-  ({ servidor, cliente } = await subirServidor());
+  ({ servidor, cliente, base } = await subirServidor());
 });
 
 beforeEach(async () => {
@@ -82,6 +84,29 @@ function principais(quiz) {
   return ativas(quiz)
     .map((p) => p.enunciado)
     .filter((e) => !e.startsWith("Extra "));
+}
+
+/**
+ * Pede aprovação e confere que passou.
+ *
+ * Nos testes a IA é o provedor falso, que aprova tudo que não tem
+ * os marcadores [recusar] ou [revisar] no texto.
+ */
+async function publicar(quiz) {
+  const resposta = await cliente.post(`/api/quizzes/${quiz.id}/publicar`);
+  assert.equal(resposta.dados?.quiz?.situacao, "publicado", JSON.stringify(resposta.dados));
+  return resposta;
+}
+
+/** Cria uma conta nova e deixa o cliente logado nela. */
+async function novaConta(nome) {
+  cliente.esquecerCookie();
+  await cliente.post("/api/usuarios", {
+    nome,
+    email: `${nome.toLowerCase()}@exemplo.com`,
+    senha: "uma-senha-boa"
+  });
+  return cliente.cookieAtual;
 }
 
 async function criarQuiz(titulo = "Geografia") {
@@ -173,6 +198,7 @@ describe("GET /api/quizzes", () => {
     await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
       perguntas: completar([pergunta(), pergunta("Qual o maior rio?")], MIN_PERGUNTAS + 2)
     });
+    await publicar(quiz);
 
     const resposta = await cliente.get("/api/quizzes");
 
@@ -183,7 +209,7 @@ describe("GET /api/quizzes", () => {
   it("abre para visitante, sem login", async () => {
     // O catálogo é a primeira tela do site. Se ele exigisse
     // sessão, a porta de entrada seria um formulário de login.
-    await criarQuiz("Aberto a todos");
+    await publicar(await criarQuiz("Aberto a todos"));
 
     cliente.esquecerCookie();
     const resposta = await cliente.get("/api/quizzes");
@@ -194,7 +220,7 @@ describe("GET /api/quizzes", () => {
   });
 
   it("mostra o quiz de outra pessoa, com o nome do autor", async () => {
-    await criarQuiz("De quem veio antes");
+    await publicar(await criarQuiz("De quem veio antes"));
 
     cliente.esquecerCookie();
     await cliente.post("/api/usuarios", {
@@ -202,7 +228,7 @@ describe("GET /api/quizzes", () => {
       email: "outra@exemplo.com",
       senha: "uma-senha-boa"
     });
-    await criarQuiz("Meu");
+    await publicar(await criarQuiz("Meu"));
 
     const { dados } = await cliente.get("/api/quizzes");
     const porTitulo = Object.fromEntries(dados.quizzes.map((q) => [q.titulo, q]));
@@ -257,6 +283,7 @@ describe("GET /api/quizzes/:id", () => {
     // abrir o DevTools antes de entrar na sala para jogar sabendo
     // tudo.
     const quiz = await criarQuiz();
+    await publicar(quiz);
 
     cliente.esquecerCookie();
     const { status, dados } = await cliente.get(`/api/quizzes/${quiz.id}`);
@@ -280,10 +307,13 @@ describe("GET /api/quizzes/:id", () => {
     await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
       perguntas: completar([pergunta("Fica"), pergunta("Sai")], MIN_PERGUNTAS + 1)
     });
+    await publicar(quiz);
 
     const { dados: antes } = await cliente.get(`/api/quizzes/${quiz.id}`);
     const alvo = antes.quiz.perguntas.find((p) => p.enunciado === "Sai");
 
+    // Bloquear não tira do catálogo: não acrescenta conteúdo, e a
+    // pergunta bloqueada já tinha sido lida pela moderação.
     await cliente.patch(`/api/quizzes/${quiz.id}/perguntas/${alvo.id}`, {
       ativa: false
     });
@@ -407,6 +437,33 @@ describe("PUT /api/quizzes/:id/perguntas", () => {
     assert.equal(resposta.status, 400);
   });
 
+  it("as desativadas não contam para o limite de 50", async () => {
+    // Pergunta nunca se apaga, então as desativadas se acumulam. Se
+    // contassem para o limite, um quiz pararia de salvar depois de
+    // algumas trocas — foi o que travou um quiz real, com 220
+    // perguntas guardadas e só 20 ativas.
+    const quiz = await criarQuiz();
+
+    for (let rodada = 0; rodada < 3; rodada++) {
+      const resposta = await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
+        perguntas: completar([], 50)
+      });
+      assert.equal(resposta.status, 200, `rodada ${rodada + 1}`);
+    }
+
+    const { rows } = await pool.query(
+      "SELECT COUNT(*)::int AS total FROM perguntas WHERE quiz_id = $1",
+      [quiz.id]
+    );
+    assert.ok(rows[0].total > 50, "as antigas continuam guardadas");
+
+    const demais = await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
+      perguntas: completar([], 51)
+    });
+    assert.equal(demais.status, 400);
+    assert.match(demais.dados.erro, /50 perguntas ativas/);
+  });
+
   it("a contagem do catálogo conta só as ativas", async () => {
     const quiz = await criarQuiz();
 
@@ -419,7 +476,8 @@ describe("PUT /api/quizzes/:id/perguntas", () => {
       perguntas: completar([pergunta("Só esta")])
     });
 
-    const { dados } = await cliente.get("/api/quizzes");
+    // Pela lista do dono: editar acabou de tirar o quiz do catálogo.
+    const { dados } = await cliente.get("/api/quizzes?meus=1");
     assert.equal(dados.quizzes[0].perguntas, MIN_PERGUNTAS);
   });
 
@@ -623,6 +681,7 @@ describe("POST /api/quizzes/:id/copia", () => {
     // A audiência é do original. Uma cópia nascer com 300
     // acessos seria mentira sobre algo nunca apresentado.
     const quiz = await criarQuiz();
+    await publicar(quiz);
 
     await cliente.post("/api/salas", { quiz_id: quiz.id });
     await cliente.post("/api/salas", { quiz_id: quiz.id });
@@ -681,6 +740,7 @@ describe("POST /api/quizzes/:id/copia", () => {
     // um quiz alheio leva uma versão própria em vez de pedir
     // permissão para mexer no original.
     const quiz = await criarQuiz("Original de outra pessoa");
+    await publicar(quiz);
 
     cliente.esquecerCookie();
     await cliente.post("/api/usuarios", {
@@ -724,5 +784,464 @@ describe("DELETE /api/quizzes/:id", () => {
     // ON DELETE CASCADE em cadeia: quiz -> perguntas -> alternativas.
     const { rows } = await pool.query("SELECT COUNT(*)::int AS total FROM alternativas");
     assert.equal(rows[0].total, 0);
+  });
+});
+
+describe("moderação: só entra no catálogo o que foi aprovado", () => {
+  it("quiz novo nasce rascunho: é do dono, mas fica fora do catálogo", async () => {
+    const quiz = await criarQuiz("Ainda não");
+
+    assert.equal(quiz.situacao, "rascunho");
+
+    const { dados: catalogo } = await cliente.get("/api/quizzes");
+    assert.equal(catalogo.quizzes.length, 0);
+
+    // O dono continua achando em "meus".
+    const { dados: meus } = await cliente.get("/api/quizzes?meus=1");
+    assert.equal(meus.quizzes[0].situacao, "rascunho");
+
+    // E para os outros ele não existe.
+    cliente.esquecerCookie();
+    const { status } = await cliente.get(`/api/quizzes/${quiz.id}`);
+    assert.equal(status, 404);
+  });
+
+  it("aprovado pela IA entra no catálogo", async () => {
+    const quiz = await criarQuiz("Aprovado");
+    await publicar(quiz);
+
+    cliente.esquecerCookie();
+    const { dados } = await cliente.get("/api/quizzes");
+    assert.deepEqual(dados.quizzes.map((q) => q.titulo), ["Aprovado"]);
+  });
+
+  it("recusado volta com o motivo e fica fora do catálogo", async () => {
+    const quiz = await criarQuiz("Ruim [recusar]");
+
+    const resposta = await cliente.post(`/api/quizzes/${quiz.id}/publicar`);
+    assert.equal(resposta.status, 200);
+    assert.equal(resposta.dados.quiz.situacao, "recusado");
+    assert.ok(resposta.dados.quiz.moderacao_motivo);
+
+    // O dono lê o motivo para corrigir...
+    const { dados: meus } = await cliente.get("/api/quizzes?meus=1");
+    assert.equal(meus.quizzes[0].moderacao_motivo, resposta.dados.quiz.moderacao_motivo);
+
+    // ...e ninguém mais vê o quiz.
+    cliente.esquecerCookie();
+    const { dados } = await cliente.get("/api/quizzes");
+    assert.equal(dados.quizzes.length, 0);
+  });
+
+  it("dúvida da IA não publica: vai para revisão humana", async () => {
+    // Na dúvida, a IA não aprova. Errar recusando custa ao dono uma
+    // espera; errar aprovando custa a todo mundo que abrir o site.
+    const quiz = await criarQuiz("Talvez [revisar]");
+
+    const resposta = await cliente.post(`/api/quizzes/${quiz.id}/publicar`);
+    assert.equal(resposta.dados.quiz.situacao, "revisao");
+
+    const { dados } = await cliente.get("/api/quizzes");
+    assert.equal(dados.quizzes.length, 0);
+
+    // E o dono não pula a fila mandando de novo.
+    const outra = await cliente.post(`/api/quizzes/${quiz.id}/publicar`);
+    assert.equal(outra.status, 409);
+  });
+
+  it("quiz publicado não se edita: as perguntas ficam como foram aprovadas", async () => {
+    // O que está no catálogo é exatamente o que foi aprovado. Para
+    // mudar, duplica-se, e a cópia passa pela aprovação de novo.
+    const quiz = await criarQuiz("Aprovado e travado");
+    await publicar(quiz);
+
+    const edicao = await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
+      perguntas: completar([pergunta("Conteúdo novo")])
+    });
+    assert.equal(edicao.status, 409);
+    assert.match(edicao.dados.erro, /Duplicar/);
+
+    const { dados } = await cliente.get(`/api/quizzes/${quiz.id}`);
+    assert.ok(!principais(dados.quiz).includes("Conteúdo novo"));
+  });
+
+  it("nem o título de um quiz publicado muda", async () => {
+    const quiz = await criarQuiz("Título aprovado");
+    await publicar(quiz);
+
+    const resposta = await cliente.patch(`/api/quizzes/${quiz.id}`, { titulo: "Outro título" });
+    assert.equal(resposta.status, 409);
+
+    const { dados } = await cliente.get("/api/quizzes");
+    assert.equal(dados.quizzes[0].titulo, "Título aprovado");
+  });
+
+  it("recusado volta a rascunho quando o dono corrige", async () => {
+    const quiz = await criarQuiz("Ruim [recusar]");
+    await cliente.post(`/api/quizzes/${quiz.id}/publicar`);
+
+    const resposta = await cliente.patch(`/api/quizzes/${quiz.id}`, { titulo: "Corrigido" });
+    assert.equal(resposta.dados.quiz.situacao, "rascunho");
+  });
+
+  it("editar durante a análise invalida a aprovação", async () => {
+    // A análise leva segundos. Pedir aprovação e trocar o conteúdo
+    // nesse meio-tempo não pode publicar um texto que a IA não leu.
+    const quiz = await criarQuiz("Inocente");
+
+    // O que a IA vai ler...
+    const lido = await carregarParaModeracao(quiz.id);
+
+    // ...e uma edição chegando antes de o veredito ser gravado.
+    await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
+      perguntas: completar([pergunta("Trocado às escondidas")])
+    });
+
+    const resultado = await analisarComIA(lido);
+    assert.equal(resultado.mudou, true);
+
+    const { dados } = await cliente.get("/api/quizzes?meus=1");
+    assert.equal(dados.quizzes[0].situacao, "rascunho");
+  });
+
+  it("só o dono pede aprovação", async () => {
+    const quiz = await criarQuiz();
+
+    await novaConta("Intrusa");
+    const resposta = await cliente.post(`/api/quizzes/${quiz.id}/publicar`);
+
+    assert.equal(resposta.status, 404);
+  });
+
+  it("copiar o rascunho de outra pessoa não é permitido", async () => {
+    const quiz = await criarQuiz("Rascunho alheio");
+
+    await novaConta("Curiosa");
+    const resposta = await cliente.post(`/api/quizzes/${quiz.id}/copia`);
+
+    assert.equal(resposta.status, 404);
+  });
+
+  it("a cópia nasce rascunho, mesmo de um quiz publicado", async () => {
+    const quiz = await criarQuiz();
+    await publicar(quiz);
+
+    const { dados } = await cliente.post(`/api/quizzes/${quiz.id}/copia`);
+    assert.equal(dados.quiz.situacao, "rascunho");
+  });
+});
+
+describe("denúncias", () => {
+  it("exige conta", async () => {
+    const quiz = await criarQuiz();
+    await publicar(quiz);
+
+    cliente.esquecerCookie();
+    const resposta = await cliente.post(`/api/quizzes/${quiz.id}/denuncias`, { motivo: "ofensivo" });
+
+    assert.equal(resposta.status, 401);
+  });
+
+  it("não deixa denunciar o próprio quiz", async () => {
+    const quiz = await criarQuiz();
+    await publicar(quiz);
+
+    const resposta = await cliente.post(`/api/quizzes/${quiz.id}/denuncias`, { motivo: "ofensivo" });
+    assert.equal(resposta.status, 400);
+  });
+
+  it("recusa motivo fora da lista", async () => {
+    const quiz = await criarQuiz();
+    await publicar(quiz);
+
+    await novaConta("Leitora");
+    const resposta = await cliente.post(`/api/quizzes/${quiz.id}/denuncias`, { motivo: "não gostei" });
+
+    assert.equal(resposta.status, 400);
+  });
+
+  it("uma denúncia aberta por pessoa", async () => {
+    // Sem isso, uma pessoa sozinha tiraria qualquer quiz do ar.
+    const quiz = await criarQuiz();
+    await publicar(quiz);
+
+    await novaConta("Insistente");
+    const primeira = await cliente.post(`/api/quizzes/${quiz.id}/denuncias`, { motivo: "ofensivo" });
+    const segunda = await cliente.post(`/api/quizzes/${quiz.id}/denuncias`, { motivo: "ofensivo" });
+
+    assert.equal(primeira.status, 201);
+    assert.equal(segunda.status, 409);
+
+    // Continua no ar: uma pessoa não basta.
+    const { dados } = await cliente.get("/api/quizzes");
+    assert.equal(dados.quizzes.length, 1);
+  });
+
+  it(`${LIMITE_DENUNCIAS} pessoas diferentes tiram o quiz do ar`, async () => {
+    const quiz = await criarQuiz();
+    await publicar(quiz);
+
+    for (let i = 1; i <= LIMITE_DENUNCIAS; i++) {
+      await novaConta(`Pessoa${i}`);
+      const resposta = await cliente.post(`/api/quizzes/${quiz.id}/denuncias`, {
+        motivo: "ofensivo",
+        detalhe: "a pergunta 3 tem um xingamento"
+      });
+      assert.equal(resposta.status, 201);
+    }
+
+    const { dados } = await cliente.get("/api/quizzes");
+    assert.equal(dados.quizzes.length, 0);
+  });
+
+  it("rascunho não pode ser denunciado (para os outros, ele não existe)", async () => {
+    const quiz = await criarQuiz();
+
+    await novaConta("Leitor");
+    const resposta = await cliente.post(`/api/quizzes/${quiz.id}/denuncias`, { motivo: "ofensivo" });
+
+    assert.equal(resposta.status, 404);
+  });
+});
+
+describe("fila do administrador", () => {
+  async function virarAdmin() {
+    await pool.query("UPDATE usuarios SET admin = TRUE WHERE email = 'dono@exemplo.com'");
+  }
+
+  it("só administrador vê a fila", async () => {
+    const resposta = await cliente.get("/api/moderacao/fila");
+    assert.equal(resposta.status, 403);
+  });
+
+  it("o que a IA não teve certeza aparece na fila, com o conteúdo inteiro", async () => {
+    const quiz = await criarQuiz("Na dúvida [revisar]");
+    await cliente.post(`/api/quizzes/${quiz.id}/publicar`);
+    await virarAdmin();
+
+    const { dados } = await cliente.get("/api/moderacao/fila");
+
+    assert.equal(dados.fila.length, 1);
+    assert.equal(dados.fila[0].situacao, "revisao");
+    assert.equal(dados.fila[0].perguntas.length, MIN_PERGUNTAS);
+    assert.ok(dados.fila[0].perguntas[0].alternativas.some((a) => a.correta));
+  });
+
+  it("publicar pela fila põe no catálogo e encerra as denúncias", async () => {
+    const quiz = await criarQuiz("Denunciado sem razão");
+    await publicar(quiz);
+    const donoCookie = cliente.cookieAtual;
+
+    for (let i = 1; i <= LIMITE_DENUNCIAS; i++) {
+      await novaConta(`Exagerada${i}`);
+      await cliente.post(`/api/quizzes/${quiz.id}/denuncias`, { motivo: "outro" });
+    }
+
+    cliente.definirCookie(donoCookie);
+    await virarAdmin();
+
+    const { dados: fila } = await cliente.get("/api/moderacao/fila");
+    const item = fila.fila.find((q) => q.id === quiz.id);
+    assert.equal(item.denuncias.length, LIMITE_DENUNCIAS);
+
+    const decisao = await cliente.post(`/api/moderacao/${quiz.id}`, {
+      decisao: "publicar",
+      versao: item.versao
+    });
+    assert.equal(decisao.status, 200);
+
+    const { dados: catalogo } = await cliente.get("/api/quizzes");
+    assert.equal(catalogo.quizzes.length, 1);
+
+    const { dados: depois } = await cliente.get("/api/moderacao/fila");
+    assert.equal(depois.fila.length, 0);
+  });
+
+  it("recusar exige dizer o motivo ao autor", async () => {
+    const quiz = await criarQuiz("Na dúvida [revisar]");
+    await cliente.post(`/api/quizzes/${quiz.id}/publicar`);
+    await virarAdmin();
+
+    const { dados } = await cliente.get("/api/moderacao/fila");
+    const resposta = await cliente.post(`/api/moderacao/${quiz.id}`, {
+      decisao: "recusar",
+      versao: dados.fila[0].versao
+    });
+
+    assert.equal(resposta.status, 400);
+  });
+
+  it("decisão sobre uma versão que o autor já mudou é recusada", async () => {
+    // Aprovar o que o administrador leu, não o que entrou depois.
+    const quiz = await criarQuiz("Na dúvida [revisar]");
+    await cliente.post(`/api/quizzes/${quiz.id}/publicar`);
+    await virarAdmin();
+
+    const { dados } = await cliente.get("/api/moderacao/fila");
+    const versaoLida = dados.fila[0].versao;
+
+    await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
+      perguntas: completar([pergunta("Mudou depois")])
+    });
+
+    const resposta = await cliente.post(`/api/moderacao/${quiz.id}`, {
+      decisao: "publicar",
+      versao: versaoLida
+    });
+
+    assert.equal(resposta.status, 409);
+  });
+});
+
+describe("capa enviada pelo dono", () => {
+  /**
+   * Um "PNG" mínimo: a assinatura de 8 bytes que identifica o
+   * formato, e o que vier depois. O servidor decide o tipo pelos
+   * primeiros bytes, então isto basta para ser aceito como PNG.
+   */
+  function png(conteudo = "") {
+    return Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.alloc(16),
+      Buffer.from(conteudo)
+    ]);
+  }
+
+  // O cliente dos testes fala JSON; a capa vai como bytes.
+  async function enviarCapa(quizId, bytes, tipo = "image/png") {
+    const resposta = await fetch(`${base}/api/quizzes/${quizId}/capa`, {
+      method: "PUT",
+      headers: { "Content-Type": tipo, Cookie: cliente.cookieAtual ?? "" },
+      body: bytes
+    });
+    return { status: resposta.status, dados: await resposta.json().catch(() => null) };
+  }
+
+  async function baixarCapa(url) {
+    const resposta = await fetch(base + url, { headers: { Cookie: cliente.cookieAtual ?? "" } });
+    return { status: resposta.status, tipo: resposta.headers.get("content-type"), bytes: Buffer.from(await resposta.arrayBuffer()) };
+  }
+
+  it("o dono envia a capa e ela é servida daqui, com os mesmos bytes", async () => {
+    const quiz = await criarQuiz();
+    const arquivo = png("minha capa");
+
+    const envio = await enviarCapa(quiz.id, arquivo);
+    assert.equal(envio.status, 200);
+
+    const { dados } = await cliente.get(`/api/quizzes/${quiz.id}`);
+    assert.match(dados.quiz.imagem_url, new RegExp(`^/api/quizzes/${quiz.id}/capa\\?v=\\d+$`));
+
+    const capa = await baixarCapa(dados.quiz.imagem_url);
+    assert.equal(capa.status, 200);
+    assert.equal(capa.tipo, "image/png");
+    assert.ok(capa.bytes.equals(arquivo));
+  });
+
+  it("capa de rascunho é só do dono; publicada é de todo mundo", async () => {
+    const quiz = await criarQuiz();
+    await enviarCapa(quiz.id, png());
+    const url = `/api/quizzes/${quiz.id}/capa`;
+    const donoCookie = cliente.cookieAtual;
+
+    cliente.esquecerCookie();
+    assert.equal((await baixarCapa(url)).status, 404);
+
+    cliente.definirCookie(donoCookie);
+    await publicar(quiz);
+
+    cliente.esquecerCookie();
+    assert.equal((await baixarCapa(url)).status, 200);
+  });
+
+  it("recusa o que não é imagem, mesmo dizendo que é", async () => {
+    // O Content-Type é o que o cliente DIZ que mandou. Quem decide é
+    // o começo do arquivo.
+    const quiz = await criarQuiz();
+
+    const html = Buffer.from("<html><script>alert(1)</script></html>");
+    const resposta = await enviarCapa(quiz.id, html, "image/png");
+
+    assert.equal(resposta.status, 400);
+    assert.match(resposta.dados.erro, /não é uma imagem/);
+  });
+
+  it("recusa SVG", async () => {
+    // SVG é texto que pode carregar script.
+    const quiz = await criarQuiz();
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+
+    const resposta = await enviarCapa(quiz.id, svg, "image/svg+xml");
+    assert.equal(resposta.status, 400);
+  });
+
+  it("recusa arquivo acima do limite, com 413 e não com erro interno", async () => {
+    const quiz = await criarQuiz();
+    const grande = png("x".repeat(1024 * 1024 + 10));
+
+    const resposta = await enviarCapa(quiz.id, grande);
+    assert.equal(resposta.status, 413);
+  });
+
+  it("perguntas certas com capa imprópria: recusado", async () => {
+    // A capa vai para a IA junto com o texto. Aprovar as perguntas e
+    // deixar passar a imagem seria o pior caso: a capa é a primeira
+    // coisa que todo mundo vê.
+    const quiz = await criarQuiz("Perguntas impecáveis");
+    await enviarCapa(quiz.id, png("[recusar]"));
+
+    const resposta = await cliente.post(`/api/quizzes/${quiz.id}/publicar`);
+    assert.equal(resposta.dados.quiz.situacao, "recusado");
+    assert.match(resposta.dados.quiz.moderacao_motivo, /[Cc]apa/);
+  });
+
+  it("trocar a capa de um quiz publicado não é permitido", async () => {
+    // A capa aprovada é a capa servida. Trocar depois seria o mesmo
+    // buraco do endereço externo, só que por dentro.
+    const quiz = await criarQuiz();
+    await enviarCapa(quiz.id, png("aprovada"));
+    await publicar(quiz);
+
+    const troca = await enviarCapa(quiz.id, png("trocada às escondidas"));
+    assert.equal(troca.status, 409);
+
+    const remocao = await fetch(`${base}/api/quizzes/${quiz.id}/capa`, {
+      method: "DELETE",
+      headers: { Cookie: cliente.cookieAtual }
+    });
+    assert.equal(remocao.status, 409);
+  });
+
+  it("trocar a capa durante a análise invalida a aprovação", async () => {
+    const quiz = await criarQuiz();
+    await enviarCapa(quiz.id, png("inocente"));
+
+    const lido = await carregarParaModeracao(quiz.id);
+    await enviarCapa(quiz.id, png("trocada"));
+
+    const resultado = await analisarComIA(lido);
+    assert.equal(resultado.mudou, true);
+  });
+
+  it("a cópia leva a capa junto", async () => {
+    const quiz = await criarQuiz();
+    const arquivo = png("vai junto");
+    await enviarCapa(quiz.id, arquivo);
+    await publicar(quiz);
+
+    const { dados } = await cliente.post(`/api/quizzes/${quiz.id}/copia`);
+    const { dados: copia } = await cliente.get(`/api/quizzes/${dados.quiz.id}`);
+
+    const capa = await baixarCapa(copia.quiz.imagem_url);
+    assert.ok(capa.bytes.equals(arquivo));
+  });
+
+  it("só o dono envia capa", async () => {
+    const quiz = await criarQuiz();
+
+    await novaConta("Vizinha");
+    const resposta = await enviarCapa(quiz.id, png());
+
+    assert.equal(resposta.status, 404);
   });
 });

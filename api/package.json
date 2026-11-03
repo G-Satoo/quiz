@@ -10,7 +10,8 @@
     "semear": "node scripts/semear.js",
     "test": "node --test tests/*.test.js",
     "test:integracao": "node --test --test-concurrency=1 tests/integracao/*.test.js",
-    "semear:catalogo": "node scripts/semear-catalogo.js"
+    "semear:catalogo": "node scripts/semear-catalogo.js",
+    "admin": "node scripts/tornar-admin.js"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",

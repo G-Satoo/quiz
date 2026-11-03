@@ -66,7 +66,7 @@ router.post(
 router.get("/eu", exigirLogin, async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      "SELECT id, nome, email, criado_em FROM usuarios WHERE id = $1",
+      "SELECT id, nome, email, criado_em, admin FROM usuarios WHERE id = $1",
       [req.usuarioId]
     );
 
@@ -93,7 +93,7 @@ router.get("/eu", exigirLogin, async (req, res, next) => {
 router.get("/eu/perfil", exigirLogin, async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      `SELECT u.id, u.nome, u.email, u.criado_em,
+      `SELECT u.id, u.nome, u.email, u.criado_em, u.admin,
               (SELECT COUNT(*) FROM quizzes q WHERE q.usuario_id = u.id)::int AS quizzes,
               (SELECT COUNT(*) FROM resultados r WHERE r.usuario_id = u.id)::int AS partidas,
               (SELECT COALESCE(SUM(r.pontos), 0) FROM resultados r WHERE r.usuario_id = u.id)::int AS pontos,

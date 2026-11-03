@@ -86,7 +86,7 @@ router.post(
       if (quizId === null) return res.status(400).json({ erro: "Informe o quiz" });
 
       const { rows } = await pool.query(
-        `SELECT q.id, q.titulo,
+        `SELECT q.id, q.titulo, q.situacao, q.usuario_id,
                 (SELECT COUNT(*) FROM perguntas p
                   WHERE p.quiz_id = q.id AND p.ativa)::int AS perguntas
            FROM quizzes q
@@ -94,7 +94,14 @@ router.post(
         [quizId]
       );
 
-      if (rows.length === 0) {
+      // Publicado, qualquer um apresenta. Rascunho, só o dono —
+      // numa sala privada, para quem tiver o código. É o jeito de
+      // testar com os amigos antes de pedir aprovação; e quem entra
+      // pelo código escolheu entrar. A partida só não vale ranking
+      // (ver gravarResultados).
+      const publicado = rows[0]?.situacao === "publicado";
+
+      if (rows.length === 0 || (!publicado && rows[0].usuario_id !== req.usuarioId)) {
         return res.status(404).json({ erro: "Quiz não encontrado" });
       }
 
@@ -121,13 +128,18 @@ router.post(
       // semana ou por dia); o contador em `quizzes` guarda o
       // total, que aparece em toda listagem e seria caro de
       // somar a cada carregamento.
-      await pool.query(
-        `WITH registro AS (
-           INSERT INTO aberturas (quiz_id) VALUES ($1)
-         )
-         UPDATE quizzes SET partidas = partidas + 1 WHERE id = $1`,
-        [quizId]
-      );
+      // Só quiz publicado conta acesso. Senão, abrir cem salas
+      // vazias do próprio rascunho seria o jeito de ele estrear no
+      // catálogo já em "mais acessados".
+      if (publicado) {
+        await pool.query(
+          `WITH registro AS (
+             INSERT INTO aberturas (quiz_id) VALUES ($1)
+           )
+           UPDATE quizzes SET partidas = partidas + 1 WHERE id = $1`,
+          [quizId]
+        );
+      }
 
       const codigo = await sortearCodigoLivre({
         quizId,

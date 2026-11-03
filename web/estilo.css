@@ -1629,3 +1629,311 @@ button.bloqueada { border-color: rgba(242, 163, 60, 0.5); color: var(--alerta); 
   .cabeca-perfil { flex-direction: column; text-align: center; gap: 14px; }
   .lista-meus li { flex-direction: column; gap: 2px; }
 }
+
+
+/* ============================================================
+   Situação do quiz no editor
+   ============================================================ */
+
+.painel-catalogo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  margin-bottom: 20px;
+  border: 1px solid var(--borda);
+  border-radius: var(--raio);
+  background: var(--superficie);
+}
+
+.situacao-catalogo { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+
+.selo-situacao {
+  flex: none;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  background: var(--borda);
+  color: var(--texto);
+}
+
+/* A cor do selo diz onde o quiz está antes de ler a frase. */
+[data-situacao="publicado"] .selo-situacao { background: rgba(72, 199, 142, 0.18); color: var(--sucesso); }
+[data-situacao="recusado"]  .selo-situacao { background: rgba(239, 94, 100, 0.16); color: var(--erro); }
+[data-situacao="revisao"]   .selo-situacao { background: rgba(242, 163, 60, 0.16); color: var(--alerta); }
+[data-situacao="recusado"] { border-color: rgba(239, 94, 100, 0.4); }
+
+.texto-situacao { font-size: 14px; line-height: 1.5; }
+.motivo-situacao { font-size: 13px; color: var(--texto-fraco); margin-top: 4px; }
+.motivo-situacao:empty { display: none; }
+
+[data-situacao="recusado"] .motivo-situacao { color: var(--erro); }
+
+#botao-publicar { flex: none; white-space: nowrap; }
+
+@media (max-width: 620px) {
+  .painel-catalogo { flex-direction: column; align-items: stretch; }
+}
+
+/* ============================================================
+   Denúncia
+   ============================================================ */
+
+/* Texto, não pílula: está ali para quem precisa sem disputar
+   atenção com "Abrir sala". */
+.botao-denunciar {
+  padding: 10px 6px;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.botao-denunciar:hover { color: #fff; filter: none; text-decoration: underline; }
+
+.motivos-denuncia {
+  border: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+}
+
+.motivos-denuncia legend { font-size: 13px; color: var(--texto-fraco); margin-bottom: 8px; padding: 0; }
+
+.motivos-denuncia label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.motivos-denuncia input { width: auto; margin: 0; }
+
+.janela textarea {
+  width: 100%;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: var(--fundo);
+  border: 1px solid var(--borda);
+  border-radius: var(--raio);
+  color: var(--texto);
+  font-family: inherit;
+  font-size: 16px;
+  resize: vertical;
+}
+
+.janela textarea:focus { outline: none; border-color: var(--destaque); }
+
+.denunciar-fim { text-align: center; margin-top: 22px; font-size: 13px; }
+.denunciar-fim a { color: var(--texto-fraco); }
+
+@media (max-width: 520px) {
+  .motivos-denuncia { grid-template-columns: 1fr; }
+}
+
+/* Selo de situação também na lista do perfil. */
+.nome-meus { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+.lista-meus .selo-situacao { font-size: 10px; padding: 2px 8px; }
+.selo-situacao[data-situacao="publicado"] { background: rgba(72, 199, 142, 0.18); color: var(--sucesso); }
+.selo-situacao[data-situacao="recusado"]  { background: rgba(239, 94, 100, 0.16); color: var(--erro); }
+.selo-situacao[data-situacao="revisao"]   { background: rgba(242, 163, 60, 0.16); color: var(--alerta); }
+
+/* ============================================================
+   Fila de moderação
+   ============================================================ */
+
+.item-moderacao { margin-bottom: 18px; }
+.cabeca-moderacao { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.cabeca-moderacao h2 { margin: 0; font-size: 18px; overflow-wrap: anywhere; }
+.meta-moderacao { font-size: 13px; color: var(--texto-fraco); margin: 6px 0 10px; overflow-wrap: anywhere; }
+.descricao-moderacao { margin: 0 0 10px; overflow-wrap: anywhere; }
+.capa-moderacao { display: block; max-width: 160px; max-height: 200px; border-radius: 8px; margin-bottom: 12px; }
+
+.denuncias-moderacao {
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border-radius: var(--raio);
+  background: rgba(239, 94, 100, 0.1);
+  border: 1px solid rgba(239, 94, 100, 0.3);
+  font-size: 14px;
+}
+.denuncias-moderacao ul { margin: 6px 0 0; padding-left: 18px; overflow-wrap: anywhere; }
+
+.perguntas-moderacao { padding-left: 22px; margin: 0 0 14px; font-size: 14px; }
+.perguntas-moderacao > li { margin-bottom: 10px; }
+.perguntas-moderacao > li.bloqueada { opacity: 0.55; }
+.enunciado-moderacao { font-weight: 600; overflow-wrap: anywhere; }
+.perguntas-moderacao ul { list-style: none; padding-left: 0; margin: 4px 0 0; color: var(--texto-fraco); }
+.perguntas-moderacao ul li { overflow-wrap: anywhere; }
+.perguntas-moderacao .certa { color: var(--sucesso); }
+
+.acoes-moderacao textarea {
+  width: 100%;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: var(--fundo);
+  border: 1px solid var(--borda);
+  border-radius: var(--raio);
+  color: var(--texto);
+  font-family: inherit;
+  font-size: 15px;
+  resize: vertical;
+}
+.botoes-moderacao { display: flex; gap: 10px; }
+button.perigo { background: var(--erro); color: #fff; }
+
+
+/* ============================================================
+   Capa enviada no editor
+   ============================================================ */
+
+.campo-capa { display: flex; gap: 18px; align-items: flex-start; margin-bottom: 16px; }
+
+.previa-capa {
+  flex: none;
+  width: 120px;
+  aspect-ratio: 3 / 4;
+  border-radius: 8px;
+  border: 1px dashed var(--borda);
+  background: var(--fundo);
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+}
+
+.previa-capa img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.previa-capa:has(img) { border-style: solid; }
+
+.sem-capa { font-size: 11px; color: var(--texto-fraco); text-align: center; padding: 10px; line-height: 1.4; }
+
+.controles-capa { min-width: 0; }
+.botoes-capa { display: flex; gap: 8px; margin-bottom: 8px; }
+.credito-capa { font-size: 12px; color: var(--texto-fraco); margin: 6px 0 0; overflow-wrap: anywhere; }
+.credito-capa:empty { display: none; }
+
+@media (max-width: 520px) {
+  .campo-capa { flex-direction: column; align-items: stretch; }
+  .previa-capa { width: 150px; margin: 0 auto; }
+}
+
+
+/* ============================================================
+   Etapas da aprovação
+   ============================================================ */
+
+.etapas-analise {
+  margin: -8px 0 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--borda);
+  border-radius: var(--raio);
+  background: var(--superficie);
+}
+
+.etapas-analise ol { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 6px; }
+
+.etapas-analise li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--texto-fraco);
+}
+
+/* O marcador de cada etapa: vazio, girando ou feito. */
+.etapas-analise li::before {
+  content: "";
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--borda);
+}
+
+.etapas-analise li.atual { color: var(--texto); font-weight: 600; }
+.etapas-analise li.atual::before {
+  border-color: var(--destaque);
+  border-top-color: transparent;
+  animation: girar 0.8s linear infinite;
+}
+
+.etapas-analise li.feita { color: var(--texto); }
+.etapas-analise li.feita::before {
+  content: "✓";
+  border-color: var(--sucesso);
+  background: var(--sucesso);
+  color: #0b1017;
+  font-size: 10px;
+  font-weight: 900;
+  display: grid;
+  place-items: center;
+  line-height: 1;
+}
+
+#tempo-analise { font-weight: 400; color: var(--texto-fraco); }
+
+/* Barra indeterminada: diz "trabalhando" sem inventar porcentagem. */
+.barra-analise { height: 4px; border-radius: 999px; background: var(--borda); overflow: hidden; }
+.barra-analise div {
+  width: 35%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--destaque);
+  animation: correr 1.4s ease-in-out infinite;
+}
+
+.nota-analise { margin: 8px 0 0; font-size: 12px; color: var(--texto-fraco); }
+
+@keyframes girar { to { transform: rotate(360deg); } }
+@keyframes correr { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .etapas-analise li.atual::before, .barra-analise div { animation: none; }
+}
+
+/* ============================================================
+   Meus quizzes (perfil)
+   ============================================================ */
+
+.meus-quizzes { margin-bottom: 10px; }
+
+.card-meu .capa { position: relative; }
+.card-meu .foto-capa { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+.selo-no-cartao {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  z-index: 2;
+  font-size: 9px;
+  padding: 3px 8px;
+  /* O selo fica sobre a capa: sem fundo próprio, sumiria numa
+     capa clara. */
+  backdrop-filter: blur(4px);
+  background: rgba(10, 12, 16, 0.75);
+}
+
+.acoes-meu { display: flex; gap: 6px; margin-top: 8px; }
+
+.botao-acao {
+  flex: 1;
+  padding: 7px 8px;
+  border-radius: var(--raio);
+  background: var(--destaque);
+  color: #0b1017;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.botao-acao.discreto { background: transparent; border: 1px solid var(--borda); color: var(--texto); }
+.botao-acao.desligado { opacity: 0.45; cursor: default; }

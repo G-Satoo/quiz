@@ -42,10 +42,25 @@
         <h2>Meus quizzes</h2>
         <a href="editor.html"><button>+ Novo quiz</button></a>
       </div>
-      <ul class="lista-meus" id="meus"></ul>
+      <!--
+        O catálogo particular: TODOS os seus quizzes, inclusive os
+        que não estão no catálogo público. É daqui que se apresenta
+        um rascunho numa sala privada — o catálogo público só mostra
+        o que foi aprovado.
+      -->
+      <p class="subtitulo" style="margin-top:-4px">
+        Rascunhos você apresenta numa sala privada, por código. No catálogo
+        público só aparece o que foi aprovado.
+      </p>
+      <div class="catalogo meus-quizzes" id="meus"></div>
       <div id="meus-vazio" class="vazio escondido">Você ainda não criou nenhum quiz.</div>
 
       <!-- Sair mora aqui, e não no topo: é algo que se faz raramente. -->
+      <!-- Só aparece para administradores. -->
+      <p id="link-moderacao" class="escondido" style="margin-top:22px">
+        <a href="moderacao.html">Fila de moderação →</a>
+      </p>
+
       <div class="rodape-perfil">
         <button class="discreto" id="sair">Sair da conta</button>
       </div>
@@ -61,6 +76,10 @@
 // ============================================================
 
 import { montarAvatar } from "./avatar.js";
+import { artePorCategoria } from "./capas.js";
+
+// O mesmo mínimo do servidor (MIN_PERGUNTAS, em validacao.js).
+const MINIMO_PERGUNTAS = 10;
 
 const $ = (id) => document.getElementById(id);
 
@@ -80,6 +99,13 @@ async function pedir(metodo, caminho) {
 
 const numero = (n) => n.toLocaleString("pt-BR");
 
+const ROTULOS_SITUACAO = {
+  rascunho: "Rascunho",
+  publicado: "No catálogo",
+  recusado: "Recusado",
+  revisao: "Em revisão"
+};
+
 try {
   // As duas ao mesmo tempo: nenhuma depende da outra.
   const [{ perfil }, { quizzes }] = await Promise.all([
@@ -98,26 +124,12 @@ try {
   $("n-pontos").textContent = numero(perfil.pontos);
   $("n-recorde").textContent = numero(perfil.recorde);
   $("n-quizzes").textContent = numero(perfil.quizzes);
+  $("link-moderacao").classList.toggle("escondido", !perfil.admin);
 
   const lista = $("meus");
   $("meus-vazio").classList.toggle("escondido", quizzes.length > 0);
 
-  for (const quiz of quizzes) {
-    const item = document.createElement("li");
-
-    const link = document.createElement("a");
-    link.href = "editor.html?id=" + quiz.id;
-    link.textContent = quiz.titulo; // texto, nunca innerHTML
-
-    const meta = document.createElement("span");
-    meta.className = "meta-meus";
-    meta.textContent =
-      `${quiz.perguntas} pergunta${quiz.perguntas === 1 ? "" : "s"} · ${numero(quiz.partidas)} acessos` +
-      (quiz.avaliacoes > 0 ? ` · ★ ${quiz.nota.toFixed(1).replace(".", ",")}` : "");
-
-    item.append(link, meta);
-    lista.append(item);
-  }
+  for (const quiz of quizzes) lista.append(desenharMeu(quiz));
 
   $("perfil").classList.remove("escondido");
 } catch (erro) {
@@ -125,6 +137,79 @@ try {
     $("erro").textContent = erro.message;
     $("erro").classList.remove("escondido");
   }
+}
+
+/**
+ * Um cartão do catálogo particular: capa, onde o quiz está, e o que
+ * dá para fazer com ele.
+ *
+ * Os botões ficam SEMPRE visíveis, não no hover como no catálogo
+ * público: aqui a pessoa veio para agir sobre os próprios quizzes,
+ * e esconder "Apresentar" seria esconder o motivo da visita.
+ */
+function desenharMeu(quiz) {
+  const cartao = document.createElement("article");
+  cartao.className = "card-quiz card-meu";
+
+  const capa = document.createElement("div");
+  capa.className = "capa";
+
+  if (quiz.imagem_url) {
+    const img = document.createElement("img");
+    img.className = "foto-capa";
+    img.src = quiz.imagem_url;
+    img.alt = "";
+    img.loading = "lazy";
+    capa.append(img);
+  } else {
+    capa.insertAdjacentHTML("beforeend", artePorCategoria(quiz.categoria));
+  }
+
+  // Onde cada quiz está: o dono precisa ver de relance qual está
+  // no ar e qual ainda espera alguma coisa dele.
+  const selo = document.createElement("span");
+  selo.className = "selo-situacao selo-no-cartao";
+  selo.dataset.situacao = quiz.situacao;
+  selo.textContent = ROTULOS_SITUACAO[quiz.situacao] ?? quiz.situacao;
+  if (quiz.moderacao_motivo && quiz.situacao !== "publicado") selo.title = quiz.moderacao_motivo;
+  capa.append(selo);
+
+  const titulo = document.createElement("h3");
+  titulo.className = "titulo-card";
+  titulo.textContent = quiz.titulo; // texto, nunca innerHTML
+
+  const meta = document.createElement("div");
+  meta.className = "meta-card";
+  meta.textContent =
+    `${quiz.perguntas} pergunta${quiz.perguntas === 1 ? "" : "s"} · ${numero(quiz.partidas)} acessos` +
+    (quiz.avaliacoes > 0 ? ` · ★ ${quiz.nota.toFixed(1).replace(".", ",")}` : "");
+
+  const acoes = document.createElement("div");
+  acoes.className = "acoes-meu";
+
+  // Apresentar abre a sala no catálogo, que é onde mora a tela do
+  // apresentador. Rascunho abre sala privada; publicado, a normal.
+  const apresentar = document.createElement("a");
+  const pronto = quiz.perguntas >= MINIMO_PERGUNTAS;
+  apresentar.className = "botao-acao" + (pronto ? "" : " desligado");
+  apresentar.textContent = "Apresentar";
+  if (pronto) {
+    apresentar.href = `index.html?apresentar=${quiz.id}`;
+  } else {
+    apresentar.title = `Precisa de pelo menos ${MINIMO_PERGUNTAS} perguntas ativas`;
+    apresentar.setAttribute("aria-disabled", "true");
+  }
+
+  const editar = document.createElement("a");
+  editar.className = "botao-acao discreto";
+  editar.href = "editor.html?id=" + quiz.id;
+  // Publicado não se edita — no editor ele só bloqueia perguntas e
+  // duplica. O rótulo diz isso antes do clique.
+  editar.textContent = quiz.situacao === "publicado" ? "Abrir" : "Editar";
+
+  acoes.append(apresentar, editar);
+  cartao.append(capa, titulo, meta, acoes);
+  return cartao;
 }
 
 $("sair").addEventListener("click", async () => {

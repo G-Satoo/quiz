@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Moderação — Quiz</title>
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+  <div class="topo">
+    <a class="marca" href="index.html">quiz<span>.</span></a>
+    <a href="perfil.html" style="font-size:13px">← Perfil</a>
+  </div>
+
+  <div class="conteudo">
+    <h1>Fila de moderação</h1>
+    <p class="subtitulo">
+      O que a IA não teve certeza e o que foi denunciado. Primeiro os que estão
+      fora do ar esperando decisão; depois os publicados com denúncia aberta.
+    </p>
+
+    <div id="erro" class="erro escondido"></div>
+    <div id="vazia" class="vazio escondido">Nada na fila. 🎉</div>
+    <div id="fila"></div>
+  </div>
+
+<script type="module">
+// ============================================================
+// Moderação (administrador)
+//
+// Tudo que precisa para decidir está no cartão: o conteúdo inteiro
+// (as bloqueadas também, porque podem voltar), o gabarito, as
+// denúncias e o motivo de o quiz estar aqui. Decidir não pode
+// depender de abrir outra tela.
+// ============================================================
+
+const $ = (id) => document.getElementById(id);
+
+async function pedir(metodo, caminho, corpo) {
+  const resposta = await fetch(caminho, {
+    method: metodo,
+    headers: corpo ? { "Content-Type": "application/json" } : {},
+    body: corpo ? JSON.stringify(corpo) : undefined
+  });
+
+  if (resposta.status === 401) {
+    location.href = "index.html";
+    throw new Error("sem sessão");
+  }
+
+  const dados = resposta.headers.get("content-type")?.includes("json") ? await resposta.json() : null;
+  if (!resposta.ok) throw new Error(dados?.erro ?? "Erro inesperado");
+  return dados;
+}
+
+const MOTIVOS = {
+  ofensivo: "Ofensivo ou violento",
+  sexual: "Conteúdo sexual",
+  odio: "Ódio ou discriminação",
+  golpe: "Golpe, propaganda ou link",
+  "dados-pessoais": "Dados pessoais",
+  imagem: "Imagem imprópria",
+  "sem-sentido": "Sem sentido ou spam",
+  outro: "Outro"
+};
+
+const QUEM = { ia: "a IA", admin: "um administrador", denuncias: "as denúncias", anterior: "regra antiga" };
+
+function elemento(tag, classe, texto) {
+  const el = document.createElement(tag);
+  if (classe) el.className = classe;
+  // textContent, nunca innerHTML: TUDO aqui foi escrito por um
+  // usuário — e é justamente o conteúdo suspeito de ser malicioso.
+  if (texto !== undefined) el.textContent = texto;
+  return el;
+}
+
+function desenharItem(quiz) {
+  const cartao = elemento("article", "cartao item-moderacao");
+  cartao.dataset.situacao = quiz.situacao;
+
+  const cabeca = elemento("div", "cabeca-moderacao");
+  const titulo = elemento("h2", null, quiz.titulo);
+  const selo = elemento("span", "selo-situacao", quiz.situacao === "revisao" ? "Fora do ar" : "Publicado");
+  selo.dataset.situacao = quiz.situacao;
+  cabeca.append(titulo, selo);
+
+  const meta = elemento("div", "meta-moderacao",
+    `por ${quiz.autor} · ${quiz.categoria}` +
+    (quiz.moderacao_motivo ? ` · ${QUEM[quiz.moderacao_por] ?? quiz.moderacao_por}: ${quiz.moderacao_motivo}` : ""));
+
+  cartao.append(cabeca, meta);
+
+  if (quiz.descricao) cartao.append(elemento("p", "descricao-moderacao", quiz.descricao));
+
+  // A mesma capa que a IA viu e que o público veria: o arquivo que
+  // o autor enviou, guardado aqui.
+  if (quiz.capa_url) {
+    const capa = elemento("img", "capa-moderacao");
+    capa.src = quiz.capa_url;
+    capa.alt = "Capa do quiz";
+    capa.loading = "lazy";
+    cartao.append(capa);
+  }
+
+  if (quiz.denuncias.length > 0) {
+    const caixa = elemento("div", "denuncias-moderacao");
+    caixa.append(elemento("strong", null, `${quiz.denuncias.length} denúncia(s) aberta(s)`));
+
+    const lista = elemento("ul");
+    for (const d of quiz.denuncias) {
+      lista.append(elemento("li", null, MOTIVOS[d.motivo] + (d.detalhe ? ` — “${d.detalhe}”` : "")));
+    }
+    caixa.append(lista);
+    cartao.append(caixa);
+  }
+
+  const perguntas = elemento("ol", "perguntas-moderacao");
+  for (const p of quiz.perguntas) {
+    const item = elemento("li", p.ativa ? null : "bloqueada");
+    item.append(elemento("div", "enunciado-moderacao", p.enunciado + (p.ativa ? "" : "  (bloqueada)")));
+
+    const alternativas = elemento("ul");
+    for (const a of p.alternativas) {
+      alternativas.append(elemento("li", a.correta ? "certa" : null, (a.correta ? "✓ " : "") + a.texto));
+    }
+    item.append(alternativas);
+    perguntas.append(item);
+  }
+  cartao.append(perguntas);
+
+  // ----- decidir -----
+  const acoes = elemento("div", "acoes-moderacao");
+
+  const motivo = elemento("textarea");
+  motivo.rows = 2;
+  motivo.maxLength = 300;
+  motivo.placeholder = "Motivo para o autor (obrigatório para recusar)";
+
+  const aprovar = elemento("button", null, "Publicar");
+  const recusar = elemento("button", "perigo", "Recusar");
+  const erro = elemento("div", "erro escondido");
+
+  async function decidir(decisao, botao) {
+    aprovar.disabled = recusar.disabled = true;
+    erro.classList.add("escondido");
+
+    try {
+      // A versão vai junto: se o autor editou depois que esta tela
+      // abriu, o servidor recusa — não se aprova o que não se leu.
+      await pedir("POST", `/api/moderacao/${quiz.id}`, {
+        decisao,
+        motivo: motivo.value.trim() || undefined,
+        versao: quiz.versao
+      });
+      cartao.remove();
+      if ($("fila").children.length === 0) $("vazia").classList.remove("escondido");
+    } catch (e) {
+      erro.textContent = e.message;
+      erro.classList.remove("escondido");
+      aprovar.disabled = recusar.disabled = false;
+    }
+  }
+
+  aprovar.addEventListener("click", () => decidir("publicar", aprovar));
+  recusar.addEventListener("click", () => decidir("recusar", recusar));
+
+  const botoes = elemento("div", "botoes-moderacao");
+  botoes.append(aprovar, recusar);
+  acoes.append(erro, motivo, botoes);
+  cartao.append(acoes);
+
+  return cartao;
+}
+
+try {
+  const { fila } = await pedir("GET", "/api/moderacao/fila");
+  $("vazia").classList.toggle("escondido", fila.length > 0);
+  for (const quiz of fila) $("fila").append(desenharItem(quiz));
+} catch (erro) {
+  if (erro.message !== "sem sessão") {
+    $("erro").textContent = erro.message;
+    $("erro").classList.remove("escondido");
+  }
+}
+</script>
+</body>
+</html>

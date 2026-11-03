@@ -217,7 +217,9 @@ export const MIN_PERGUNTAS = 10;
 export function validarPerguntas(perguntas) {
   if (!Array.isArray(perguntas)) return "Formato inválido das perguntas";
   if (perguntas.length === 0) return "O quiz precisa de pelo menos uma pergunta";
-  if (perguntas.length > 50) return "São no máximo 50 perguntas por quiz";
+  // Limite do tamanho da LISTA, só para conter o pedido: pergunta
+  // nunca se apaga, e as desativadas se acumulam com o tempo.
+  if (perguntas.length > 300) return "Lista de perguntas grande demais";
 
   for (const [posicao, pergunta] of perguntas.entries()) {
     const erro = validarPergunta(pergunta, posicao);
@@ -229,10 +231,32 @@ export function validarPerguntas(perguntas) {
   // sala que termina na primeira tela.
   const ativas = perguntas.filter((p) => p.ativa !== false).length;
 
+  // O limite de 50 vale para as ATIVAS, que são o que a partida
+  // tem. Contar as desativadas faria um quiz com 45 perguntas e
+  // algumas aposentadas parar de salvar sem que ninguém entendesse
+  // por quê.
+  if (ativas > 50) return "São no máximo 50 perguntas ativas por quiz";
+
   if (ativas < MIN_PERGUNTAS) {
     const faltam = MIN_PERGUNTAS - ativas;
     return `O quiz precisa de pelo menos ${MIN_PERGUNTAS} perguntas ativas — falta${faltam === 1 ? "" : "m"} ${faltam}`;
   }
 
+  return null;
+}
+
+// As mesmas do CHECK da migração 012.
+export const MOTIVOS_DENUNCIA = [
+  "ofensivo", "sexual", "odio", "golpe", "dados-pessoais", "imagem", "sem-sentido", "outro"
+];
+
+export function validarDenuncia({ motivo, detalhe }) {
+  if (!MOTIVOS_DENUNCIA.includes(motivo)) return "Escolha o motivo da denúncia";
+  if (detalhe !== undefined && detalhe !== null && typeof detalhe !== "string") {
+    return "Detalhe inválido";
+  }
+  if (typeof detalhe === "string" && detalhe.trim().length > 300) {
+    return "O detalhe pode ter no máximo 300 caracteres";
+  }
   return null;
 }

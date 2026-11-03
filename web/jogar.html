@@ -102,6 +102,10 @@
       </div>
 
       <ol class="placar" id="placar-final"></ol>
+
+      <p class="denunciar-fim">
+        <a id="link-denunciar" href="index.html">⚑ Denunciar este quiz</a>
+      </p>
     </section>
   </div>
 
@@ -219,6 +223,12 @@ function tratar(mensagem) {
 
   if (mensagem.tipo === "bem-vindo") {
     meuId = mensagem.voce.id;
+
+    // Quem jogou é quem mais viu o conteúdo de perto. A denúncia
+    // em si acontece no catálogo, que já sabe quem está logado.
+    if (mensagem.sala.quizId) {
+      $("link-denunciar").href = `index.html?denunciar=${mensagem.sala.quizId}`;
+    }
 
     try {
       sessionStorage.setItem(

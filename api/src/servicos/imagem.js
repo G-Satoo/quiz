@@ -72,6 +72,8 @@ export async function buscarImagem(tema) {
     });
 
     const resposta = await fetch(`${BUSCA}?${parametros}`, {
+      // Busca de capa é enfeite: se o Wikimedia demorar, segue sem.
+      signal: AbortSignal.timeout(10_000),
       headers: { "User-Agent": IDENTIFICACAO }
     });
 

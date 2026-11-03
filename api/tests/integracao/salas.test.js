@@ -70,6 +70,12 @@ async function abrir(opcoes) {
 }
 
 /** Cria quiz com uma pergunta e abre uma sala para ele. */
+/** Pede aprovação ao provedor falso de IA, que aprova sem marcador. */
+async function publicar(quizId) {
+  const { dados } = await cliente.post(`/api/quizzes/${quizId}/publicar`);
+  assert.equal(dados?.quiz?.situacao, "publicado", JSON.stringify(dados));
+}
+
 async function criarSala() {
   const { dados: criado } = await cliente.post("/api/quizzes", {
     titulo: "Geografia",
@@ -103,12 +109,13 @@ describe("POST /api/salas", () => {
     assert.equal(resposta.status, 404);
   });
 
-  it("abre sala de quiz de outra pessoa", async () => {
+  it("abre sala de quiz publicado de outra pessoa", async () => {
     // Apresentar não muda o quiz: lê as perguntas e conta uma
     // abertura. Com o catálogo público, exigir posse aqui
     // deixaria a maior parte da vitrine com um botão que só dá
     // erro. O que muda conteúdo continua trancado no dono.
     const sala = await criarSala();
+    await publicar(sala.quizId);
 
     cliente.esquecerCookie();
     await cliente.post("/api/usuarios", {
@@ -410,5 +417,32 @@ describe("WebSocket: segurança do handshake", () => {
       conectar(baseWs, { origem: "http://site-malicioso.com" }),
       /socket hang up|ECONNRESET|Unexpected server response/
     );
+  });
+});
+
+describe("sala de rascunho", () => {
+  it("o dono abre sala privada do próprio rascunho, sem contar acesso", async () => {
+    // É o jeito de testar com os amigos antes de pedir aprovação.
+    // Só não conta acesso: senão cem salas vazias fariam o quiz
+    // estrear no catálogo já entre os mais acessados.
+    const sala = await criarSala();
+    assert.match(sala.codigo, /^[2-9A-HJ-NP-Z]{6}$/);
+
+    const { rows } = await pool.query("SELECT partidas FROM quizzes WHERE id = $1", [sala.quizId]);
+    assert.equal(rows[0].partidas, 0);
+  });
+
+  it("ninguém mais abre sala do rascunho de outra pessoa", async () => {
+    const sala = await criarSala();
+
+    cliente.esquecerCookie();
+    await cliente.post("/api/usuarios", {
+      nome: "Outra",
+      email: "outra@exemplo.com",
+      senha: "uma-senha-boa"
+    });
+
+    const resposta = await cliente.post("/api/salas", { quiz_id: sala.quizId });
+    assert.equal(resposta.status, 404);
   });
 });

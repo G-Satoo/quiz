@@ -17,23 +17,73 @@
     <div id="aviso-salvo" class="aviso escondido">Salvo.</div>
 
     <div id="aviso-travado" class="aviso-travado escondido">
-      <strong>Este quiz já foi apresentado.</strong>
-      As perguntas foram testadas com gente de verdade, então ficam como estão —
-      você pode <em>bloquear</em> uma que não queira mais usar, e isso vale na hora.
-      Para mudar o conteúdo, use <strong>Duplicar</strong>: a cópia é sua para editar
-      à vontade, e o original segue intacto com o histórico dele.
+      <strong id="motivo-trava">Este quiz já foi apresentado.</strong>
+      Perguntas, título e capa ficam como estão — você pode <em>bloquear</em> uma
+      pergunta que não queira mais usar, e isso vale na hora. Para mudar o conteúdo,
+      use <strong>Duplicar</strong>: a cópia é sua para editar à vontade e passa pela
+      aprovação de novo.
+    </div>
+
+    <!--
+      Onde o quiz está: só do dono (rascunho), no catálogo, recusado
+      ou esperando um humano. Fica no topo porque responde a primeira
+      pergunta de quem abre o editor: "isto está no ar?".
+    -->
+    <div id="painel-catalogo" class="painel-catalogo escondido">
+      <div class="situacao-catalogo">
+        <span class="selo-situacao" id="selo-situacao"></span>
+        <div>
+          <div class="texto-situacao" id="texto-situacao"></div>
+          <div class="motivo-situacao" id="motivo-situacao"></div>
+        </div>
+      </div>
+      <button id="botao-publicar" class="escondido">Enviar para aprovação</button>
+    </div>
+
+    <!--
+      Etapas da aprovação. A análise da IA é uma espera só, sem
+      progresso real para mostrar — então a tela diz em que etapa
+      está e há quanto tempo, em vez de fingir uma porcentagem.
+    -->
+    <div id="etapas-analise" class="etapas-analise escondido" aria-live="polite">
+      <ol>
+        <li data-etapa="salvar">Salvando alterações e capa</li>
+        <li data-etapa="ia">Analisando perguntas e capa com a IA <span id="tempo-analise"></span></li>
+        <li data-etapa="resultado">Resultado</li>
+      </ol>
+      <div class="barra-analise"><div></div></div>
+      <p class="nota-analise" id="nota-analise">Costuma levar de 5 a 20 segundos.</p>
     </div>
 
     <div class="cartao" style="margin-bottom:26px">
       <label for="titulo">Título do quiz</label>
       <input id="titulo" maxlength="140" placeholder="Ex.: Conhecimentos gerais" required>
 
-      <label for="imagem">Imagem de capa (opcional)</label>
-      <input id="imagem" maxlength="500" placeholder="Cole o endereço de uma imagem, ou deixe vazio">
-      <p class="dica-campo">
-        Vazio usa o desenho da categoria com o símbolo por cima. Se colar um
-        endereço, use imagem que você tenha direito de usar.
-      </p>
+      <!--
+        A capa é ENVIADA, não colada como endereço. Imagem que mora
+        em outro site pode ser trocada depois da aprovação; esta
+        mora aqui, e o que a moderação viu é o que todo mundo vê.
+      -->
+      <label for="arquivo-capa">Capa (opcional)</label>
+      <div class="campo-capa">
+        <div class="previa-capa" id="previa-capa">
+          <span class="sem-capa">sem capa — usa o desenho da categoria</span>
+        </div>
+        <div class="controles-capa">
+          <input type="file" id="arquivo-capa" accept="image/png,image/jpeg,image/webp" class="escondido">
+          <div class="botoes-capa">
+            <button type="button" class="discreto" id="botao-escolher-capa">Escolher imagem</button>
+            <button type="button" class="discreto escondido" id="botao-remover-capa">Remover</button>
+          </div>
+          <p class="dica-campo">
+            Qualquer foto serve: ela é recortada em <strong>3:4</strong> e reduzida para
+            <strong>600×800</strong> aqui mesmo, antes de enviar. PNG, JPEG ou WEBP.
+            Use imagem que você tenha direito de usar — ela passa pela moderação junto
+            com as perguntas.
+          </p>
+          <p class="credito-capa" id="credito-capa"></p>
+        </div>
+      </div>
 
       <div class="linha-formulario">
         <div style="flex:2">
@@ -108,6 +158,8 @@
     <div class="rodape-editor">
       <button id="botao-salvar">Salvar quiz</button>
       <button class="discreto escondido" id="botao-copiar">Duplicar</button>
+      <!-- Rascunho abre sala privada; publicado, a sala normal. -->
+      <a class="escondido" id="link-apresentar"><button type="button" class="discreto">Apresentar</button></a>
     </div>
   </div>
 
@@ -155,6 +207,177 @@ let perguntas = [];
  */
 let travado = false;
 
+// ----- Capa -----
+//
+// O que a tela vai fazer com a capa no próximo salvamento:
+//   null                         nada mudou
+//   { blob, credito, pagina }    enviar esta imagem
+//   "remover"                    tirar a capa
+let capaPendente = null;
+let urlPrevia = null;
+
+const LARGURA_CAPA = 600;
+const ALTURA_CAPA = 800;
+
+/**
+ * Recorta no centro em 3:4 e reduz para 600x800, no navegador.
+ *
+ * Três ganhos de uma vez: todo quiz fica com a capa no mesmo
+ * formato sem a pessoa precisar preparar nada; o arquivo cai para
+ * dezenas de KB; e redesenhar num canvas descarta os metadados da
+ * foto — incluindo a localização GPS que o celular grava.
+ *
+ * O servidor confere tudo de novo: isto é conveniência, não
+ * segurança.
+ */
+async function prepararCapa(origem) {
+  const imagem = await createImageBitmap(origem);
+
+  // "cover": preenche o 3:4 inteiro e corta o que sobra, centrado.
+  const escala = Math.max(LARGURA_CAPA / imagem.width, ALTURA_CAPA / imagem.height);
+  const largura = imagem.width * escala;
+  const altura = imagem.height * escala;
+
+  const tela = document.createElement("canvas");
+  tela.width = LARGURA_CAPA;
+  tela.height = ALTURA_CAPA;
+  tela.getContext("2d").drawImage(
+    imagem,
+    (LARGURA_CAPA - largura) / 2,
+    (ALTURA_CAPA - altura) / 2,
+    largura,
+    altura
+  );
+  imagem.close();
+
+  // WEBP quando o navegador sabe gerar; senão JPEG. Os dois são
+  // aceitos pelo servidor.
+  const gerar = (tipo) => new Promise((resolver) => tela.toBlob(resolver, tipo, 0.85));
+  const webp = await gerar("image/webp");
+  return webp?.type === "image/webp" ? webp : gerar("image/jpeg");
+}
+
+function mostrarPrevia(url) {
+  const previa = $("previa-capa");
+  previa.innerHTML = "";
+
+  if (!url) {
+    previa.innerHTML = '<span class="sem-capa">sem capa — usa o desenho da categoria</span>';
+  } else {
+    const img = document.createElement("img");
+    img.src = url;
+    img.alt = "Prévia da capa";
+    previa.append(img);
+  }
+
+  if (!travado) $("botao-remover-capa").classList.toggle("escondido", !url);
+}
+
+async function escolherCapa(origem, { credito = null, pagina = null } = {}) {
+  limparErro();
+
+  try {
+    const blob = await prepararCapa(origem);
+    capaPendente = { blob, credito, pagina };
+
+    if (urlPrevia) URL.revokeObjectURL(urlPrevia);
+    urlPrevia = URL.createObjectURL(blob);
+    mostrarPrevia(urlPrevia);
+
+    $("credito-capa").textContent = credito ? `Imagem: ${credito}` : "";
+  } catch {
+    mostrarErro("Não consegui abrir essa imagem. Tente outro arquivo (PNG, JPEG ou WEBP).");
+  }
+}
+
+$("botao-escolher-capa").addEventListener("click", () => $("arquivo-capa").click());
+
+$("arquivo-capa").addEventListener("change", () => {
+  const arquivo = $("arquivo-capa").files[0];
+  if (arquivo) escolherCapa(arquivo);
+  $("arquivo-capa").value = "";
+});
+
+$("botao-remover-capa").addEventListener("click", () => {
+  capaPendente = "remover";
+  $("credito-capa").textContent = "";
+  mostrarPrevia(null);
+});
+
+/** Envia (ou remove) a capa pendente. Chamado depois que o quiz existe. */
+async function gravarCapa() {
+  if (!capaPendente) return;
+
+  if (capaPendente === "remover") {
+    const { situacao: nova } = await pedir("DELETE", `/api/quizzes/${quizId}/capa`);
+    situacao = nova;
+    capaPendente = null;
+    return;
+  }
+
+  const cabecalhos = { "Content-Type": capaPendente.blob.type };
+  // Crédito em cabeçalho porque o corpo é a própria imagem.
+  // encodeURIComponent: cabeçalho HTTP não aceita acento cru.
+  if (capaPendente.credito) cabecalhos["X-Capa-Credito"] = encodeURIComponent(capaPendente.credito);
+  if (capaPendente.pagina) cabecalhos["X-Capa-Pagina"] = encodeURIComponent(capaPendente.pagina);
+
+  const resposta = await fetch(`/api/quizzes/${quizId}/capa`, {
+    method: "PUT",
+    headers: cabecalhos,
+    body: capaPendente.blob
+  });
+  const dados = await resposta.json().catch(() => null);
+  if (!resposta.ok) throw new Error(dados?.erro ?? "Não consegui enviar a capa");
+
+  situacao = dados.situacao;
+  capaPendente = null;
+}
+
+// Onde o quiz está no caminho da moderação. Ver
+// servicos/moderacao.js no servidor.
+let situacao = null;
+let motivoSituacao = null;
+
+const SITUACOES = {
+  rascunho: {
+    selo: "Rascunho",
+    texto: "Só você vê. Dá para jogar numa sala privada, por código, mas não aparece no catálogo nem vale pontos no ranking.",
+    podeEnviar: true
+  },
+  publicado: {
+    selo: "No catálogo",
+    texto: "Aprovado: aparece para todo mundo e vale pontos no ranking. Não se edita mais — para mudar, use Duplicar.",
+    podeEnviar: false
+  },
+  recusado: {
+    selo: "Recusado",
+    texto: "Não entrou no catálogo. Corrija o que está abaixo e envie de novo.",
+    podeEnviar: true
+  },
+  revisao: {
+    selo: "Em revisão",
+    texto: "Um administrador vai olhar antes de decidir. Enquanto isso, fica fora do catálogo.",
+    podeEnviar: false
+  }
+};
+
+function desenharSituacao() {
+  const info = SITUACOES[situacao];
+  $("painel-catalogo").classList.toggle("escondido", !info);
+  if (!info) return;
+
+  $("painel-catalogo").dataset.situacao = situacao;
+  $("selo-situacao").textContent = info.selo;
+
+  $("texto-situacao").textContent = info.texto;
+
+  // O motivo só ajuda quando há algo a fazer com ele.
+  const mostrarMotivo = (situacao === "recusado" || situacao === "revisao") && motivoSituacao;
+  $("motivo-situacao").textContent = mostrarMotivo ? motivoSituacao : "";
+
+  $("botao-publicar").classList.toggle("escondido", !info.podeEnviar);
+}
+
 async function pedir(metodo, caminho, corpo) {
   const resposta = await fetch(caminho, {
     method: metodo,
@@ -189,15 +412,54 @@ function limparErro() {
  * Escondê-las resolveria a trava e destruiria a utilidade.
  */
 function aplicarTrava() {
+  // Duas razões para travar, e a mais forte vem primeiro: estar no
+  // catálogo (o que foi aprovado é o que fica) ou já ter sido
+  // apresentado (as perguntas foram testadas com gente de verdade).
+  $("motivo-trava").textContent =
+    situacao === "publicado" ? "Este quiz está no catálogo." : "Este quiz já foi apresentado.";
   $("aviso-travado").classList.remove("escondido");
 
-  for (const id of ["titulo", "descricao", "categoria", "imagem"]) {
+  for (const id of ["titulo", "descricao", "categoria"]) {
     $(id).disabled = true;
   }
+  $("botao-escolher-capa").classList.add("escondido");
+  $("botao-remover-capa").classList.add("escondido");
 
   document.querySelector(".gerador").classList.add("escondido");
   $("botao-adicionar").classList.add("escondido");
   $("botao-salvar").classList.add("escondido");
+}
+
+/**
+ * As perguntas no formato da tela, a partir do que o servidor tem.
+ *
+ * O id vem junto: é por ele que o servidor sabe que esta é a MESMA
+ * pergunta, e não uma nova. Sem ele, cada salvamento criaria
+ * perguntas novas e desativaria as antigas.
+ */
+function perguntasDoServidor(quiz) {
+  return quiz.perguntas.map((p) => ({
+    id: p.id,
+    enunciado: p.enunciado,
+    segundos: p.segundos,
+    ativa: p.ativa !== false,
+    alternativas: p.alternativas.map((a) => ({ texto: a.texto, correta: a.correta }))
+  }));
+}
+
+/**
+ * Relê as perguntas do servidor depois de salvar.
+ *
+ * ERA ESTE O DEFEITO DA DUPLICAÇÃO: o id de uma pergunta nova só
+ * existe depois que o servidor a grava, e a tela nunca ia buscá-lo.
+ * No salvamento seguinte, a pergunta ia de novo sem id — o servidor
+ * criava outra e desativava a anterior. Vinte salvamentos depois, o
+ * quiz tinha cada pergunta repetida vinte vezes.
+ */
+async function recarregarPerguntas() {
+  const { quiz } = await pedir("GET", `/api/quizzes/${quizId}`);
+  perguntas = perguntasDoServidor(quiz);
+  desenhar();
 }
 
 function perguntaVazia() {
@@ -220,24 +482,34 @@ if (quizId) {
     $("titulo").value = quiz.titulo;
     $("descricao").value = quiz.descricao ?? "";
     $("categoria").value = quiz.categoria ?? "geral";
-    $("imagem").value = quiz.imagem_url ?? "";
+    mostrarPrevia(quiz.imagem_url ?? null);
+    if (quiz.imagem_credito) $("credito-capa").textContent = `Imagem: ${quiz.imagem_credito}`;
 
-    // Quiz existente pode ser duplicado.
+    // Quiz existente pode ser duplicado e apresentado.
     $("botao-copiar").classList.remove("escondido");
+    $("link-apresentar").href = `index.html?apresentar=${quizId}`;
+    $("link-apresentar").classList.remove("escondido");
 
-    travado = (quiz.partidas ?? 0) > 0;
+    situacao = quiz.situacao;
+    motivoSituacao = quiz.moderacao_motivo ?? null;
+
+    travado = (quiz.partidas ?? 0) > 0 || situacao === "publicado";
     if (travado) aplicarTrava();
 
-    // O id vem junto: é por ele que o servidor sabe que esta é a
-    // MESMA pergunta, e não uma nova. Sem ele, cada salvamento
-    // criaria perguntas novas e desativaria as antigas.
-    perguntas = quiz.perguntas.map((p) => ({
-      id: p.id,
-      enunciado: p.enunciado,
-      segundos: p.segundos,
-      ativa: p.ativa !== false,
-      alternativas: p.alternativas.map((a) => ({ texto: a.texto, correta: a.correta }))
-    }));
+    desenharSituacao();
+
+    perguntas = perguntasDoServidor(quiz);
+
+    // Vindo do "Duplicar": sem este aviso, a cópia é idêntica ao
+    // original e parece que nada aconteceu.
+    if (parametros.get("copia") === "1") {
+      history.replaceState(null, "", `editor.html?id=${quizId}`);
+      $("aviso-salvo").innerHTML =
+        "<strong>Cópia criada.</strong> Ela é sua: edite à vontade, apresente numa sala " +
+        'privada pelo <a href="perfil.html">seu perfil</a>, ou envie para aprovação para ' +
+        "ir ao catálogo.";
+      $("aviso-salvo").classList.remove("escondido");
+    }
   } catch (erro) {
     mostrarErro(erro.message);
   }
@@ -637,7 +909,22 @@ $("botao-gerar").addEventListener("click", async () => {
 
     // Só preenche o símbolo se você ainda não escolheu um —
     // sugestão não sobrescreve decisão.
-    if (imagem?.url && !$("imagem").value.trim()) $("imagem").value = imagem.url;
+    // A sugestão do Wikimedia entra pelo mesmo caminho de uma foto
+    // escolhida: o NAVEGADOR baixa (o Wikimedia permite), recorta e
+    // a capa é enviada no salvamento. O servidor nunca busca nada
+    // lá fora. Só sugere se ainda não há capa nenhuma.
+    const semCapa = !capaPendente && !$("previa-capa").querySelector("img");
+    if (imagem?.url && semCapa) {
+      fetch(imagem.url)
+        .then((r) => (r.ok ? r.blob() : Promise.reject()))
+        .then((blob) => escolherCapa(blob, {
+          credito: imagem.autor ? `${imagem.autor} · ${imagem.licenca}` : null,
+          pagina: imagem.pagina ?? null
+        }))
+        .catch(() => {
+          // Sem capa sugerida é só menos bonito; não vale um erro.
+        });
+    }
 
     $("aviso-salvo").textContent = doCache
       ? `${geradas.length} pergunta(s) reaproveitadas de uma geração anterior. Revise e salve.`
@@ -653,7 +940,14 @@ $("botao-gerar").addEventListener("click", async () => {
   }
 });
 
-$("botao-salvar").addEventListener("click", async () => {
+/**
+ * Grava o que está na tela. Devolve true se gravou.
+ *
+ * Separado do clique porque "Enviar para aprovação" salva antes de
+ * enviar: a IA tem que ler o que a pessoa está vendo, não a última
+ * versão que ela lembrou de salvar.
+ */
+async function salvar({ avisar = true } = {}) {
   limparErro();
   $("aviso-salvo").classList.add("escondido");
   $("botao-salvar").disabled = true;
@@ -666,7 +960,11 @@ $("botao-salvar").addEventListener("click", async () => {
     // do texto é erro de digitação, não conteúdo.
     // Sem o campo `conferencia`: ele é rascunho da tela, não
     // parte do quiz. Mandar junto só faria o servidor recusar.
-    const paraEnviar = perguntas.map((p) => ({
+    // Só as ATIVAS. Pergunta que fica de fora da lista o servidor
+    // desativa — e as desativadas já estão desativadas. Mandar as
+    // aposentadas a cada salvamento só faria a lista crescer para
+    // sempre, já que pergunta nunca se apaga.
+    const paraEnviar = perguntas.filter((p) => p.ativa !== false).map((p) => ({
       id: p.id,
       ativa: p.ativa !== false,
       enunciado: p.enunciado.trim(),
@@ -677,8 +975,7 @@ $("botao-salvar").addEventListener("click", async () => {
     const dados = {
       titulo,
       descricao: $("descricao").value.trim(),
-      categoria: $("categoria").value,
-      imagem: $("imagem").value.trim() ? { url: $("imagem").value.trim() } : undefined
+      categoria: $("categoria").value
     };
 
     if (quizId) {
@@ -699,24 +996,136 @@ $("botao-salvar").addEventListener("click", async () => {
       history.replaceState(null, "", `editor.html?id=${quizId}`);
       $("botao-copiar").classList.remove("escondido");
 
+      situacao = quiz.situacao;
+      motivoSituacao = null;
+
+      // A capa vai depois, como arquivo: precisa do quiz existindo.
+      await gravarCapa();
+      desenharSituacao();
+
+      // Todas as perguntas acabaram de ganhar id no servidor.
+      await recarregarPerguntas();
+
       // Já foram no POST; não precisa mandar de novo.
-      $("aviso-salvo").textContent = "Quiz criado.";
-      $("aviso-salvo").classList.remove("escondido");
-      setTimeout(() => $("aviso-salvo").classList.add("escondido"), 2500);
-      return;
+      if (avisar) {
+        $("aviso-salvo").textContent = "Quiz criado.";
+        $("aviso-salvo").classList.remove("escondido");
+        setTimeout(() => $("aviso-salvo").classList.add("escondido"), 2500);
+      }
+      return true;
     }
 
     // A validação de verdade é do servidor — ele conhece as
     // regras e é quem não pode ser contornado. A tela só repassa
     // a mensagem, que já vem dizendo QUAL pergunta está errada.
-    await pedir("PUT", `/api/quizzes/${quizId}/perguntas`, { perguntas: paraEnviar });
+    const resposta = await pedir("PUT", `/api/quizzes/${quizId}/perguntas`, { perguntas: paraEnviar });
 
-    $("aviso-salvo").classList.remove("escondido");
-    setTimeout(() => $("aviso-salvo").classList.add("escondido"), 2500);
+    situacao = resposta.situacao;
+    await gravarCapa();
+    if (situacao !== "revisao") motivoSituacao = null;
+    desenharSituacao();
+
+    // As perguntas novas acabaram de ganhar id no servidor.
+    await recarregarPerguntas();
+
+    if (avisar) {
+      $("aviso-salvo").textContent = "Salvo.";
+      $("aviso-salvo").classList.remove("escondido");
+      setTimeout(() => $("aviso-salvo").classList.add("escondido"), 2500);
+    }
+    return true;
   } catch (erro) {
     mostrarErro(erro.message);
+    return false;
   } finally {
     $("botao-salvar").disabled = false;
+  }
+}
+
+$("botao-salvar").addEventListener("click", () => salvar());
+
+/**
+ * Enviar para aprovação: salva e pede à IA.
+ *
+ * A análise leva alguns segundos (às vezes dez, quando o provedor
+ * está ocupado), então o botão diz o que está acontecendo em vez
+ * de parecer travado.
+ *
+ * Quiz travado não salva — o conteúdo dele não muda —, só envia.
+ */
+/** Marca as etapas: as anteriores feitas, a atual girando. */
+function mostrarEtapa(atual) {
+  const caixa = $("etapas-analise");
+  caixa.classList.toggle("escondido", !atual);
+  if (!atual) return;
+
+  const ordem = ["salvar", "ia", "resultado"];
+  const posicao = ordem.indexOf(atual);
+
+  for (const item of caixa.querySelectorAll("li")) {
+    const desta = ordem.indexOf(item.dataset.etapa);
+    item.className = desta < posicao ? "feita" : desta === posicao ? "atual" : "";
+  }
+}
+
+$("botao-publicar").addEventListener("click", async () => {
+  const botao = $("botao-publicar");
+  botao.disabled = true;
+  let relogio = null;
+
+  try {
+    limparErro();
+    $("aviso-salvo").classList.add("escondido");
+    $("nota-analise").textContent = "Costuma levar de 5 a 20 segundos.";
+    $("tempo-analise").textContent = "";
+
+    mostrarEtapa("salvar");
+    botao.textContent = "Salvando…";
+    if (!travado && !(await salvar({ avisar: false }))) return;
+
+    mostrarEtapa("ia");
+    botao.textContent = "Analisando…";
+
+    // Relógio na etapa da IA: é a única que demora, e "há 25 s" é
+    // informação; um botão parado não é.
+    const inicio = Date.now();
+    relogio = setInterval(() => {
+      const segundos = Math.round((Date.now() - inicio) / 1000);
+      $("tempo-analise").textContent = `· ${segundos} s`;
+      if (segundos === 25) {
+        $("nota-analise").textContent =
+          "Está demorando mais que o normal — o serviço de IA pode estar congestionado. Ainda tentando.";
+      }
+    }, 1000);
+
+    const { quiz } = await pedir("POST", `/api/quizzes/${quizId}/publicar`);
+
+    clearInterval(relogio);
+    mostrarEtapa("resultado");
+
+    situacao = quiz.situacao;
+    motivoSituacao = quiz.moderacao_motivo ?? null;
+    desenharSituacao();
+
+    if (situacao === "publicado") {
+      // Aprovado trava na hora, sem esperar recarregar a página.
+      travado = true;
+      aplicarTrava();
+      desenhar();
+
+      $("aviso-salvo").textContent = "Aprovado! O quiz já está no catálogo.";
+      $("aviso-salvo").classList.remove("escondido");
+      setTimeout(() => $("aviso-salvo").classList.add("escondido"), 4000);
+    }
+    // O resultado já está no painel de cima; as etapas saem.
+    setTimeout(() => mostrarEtapa(null), 1500);
+  } catch (erro) {
+    mostrarEtapa(null);
+    mostrarErro(erro.message);
+  } finally {
+    clearInterval(relogio);
+    botao.disabled = false;
+    botao.textContent = "Enviar para aprovação";
   }
 });
 
@@ -737,8 +1146,9 @@ $("botao-copiar").addEventListener("click", async () => {
     const { quiz } = await pedir("POST", `/api/quizzes/${quizId}/copia`);
 
     // Vai direto para a cópia: quem clicou em duplicar quer
-    // editar a cópia, não continuar no original.
-    location.href = `editor.html?id=${quiz.id}`;
+    // editar a cópia, não continuar no original. O ?copia=1 faz a
+    // página dizer isso, já que a cópia é idêntica ao original.
+    location.href = `editor.html?id=${quiz.id}&copia=1`;
   } catch (erro) {
     mostrarErro(erro.message);
     $("botao-copiar").disabled = false;

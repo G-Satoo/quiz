@@ -91,6 +91,48 @@
     </form>
   </dialog>
 
+  <!--
+    Denunciar. A IA é a primeira barreira; isto é para o que passou
+    por ela e não deveria. Exige conta, uma por pessoa por quiz, e
+    três pessoas diferentes tiram o quiz do ar até um administrador
+    olhar.
+  -->
+  <dialog id="janela-denuncia" class="janela">
+    <form id="formulario-denuncia" method="dialog">
+      <div class="cabeca-janela">
+        <h2>Denunciar quiz</h2>
+        <button type="button" class="discreto icone" id="fechar-denuncia"
+                aria-label="Fechar">✕</button>
+      </div>
+      <p class="subtitulo" id="denuncia-titulo"></p>
+
+      <div id="erro-denuncia" class="erro escondido"></div>
+      <div id="ok-denuncia" class="aviso escondido">
+        Obrigado. A denúncia foi registrada e um administrador vai olhar.
+      </div>
+
+      <div id="campos-denuncia">
+        <fieldset class="motivos-denuncia">
+          <legend>O que há de errado?</legend>
+          <label><input type="radio" name="motivo" value="ofensivo" required> Ofensivo ou violento</label>
+          <label><input type="radio" name="motivo" value="sexual"> Conteúdo sexual</label>
+          <label><input type="radio" name="motivo" value="odio"> Ódio ou discriminação</label>
+          <label><input type="radio" name="motivo" value="golpe"> Golpe, propaganda ou link</label>
+          <label><input type="radio" name="motivo" value="dados-pessoais"> Dados pessoais de alguém</label>
+          <label><input type="radio" name="motivo" value="imagem"> Imagem de capa imprópria</label>
+          <label><input type="radio" name="motivo" value="sem-sentido"> Sem sentido ou spam</label>
+          <label><input type="radio" name="motivo" value="outro"> Outro</label>
+        </fieldset>
+
+        <label for="detalhe-denuncia">Quer contar mais? (opcional)</label>
+        <textarea id="detalhe-denuncia" maxlength="300" rows="3"
+                  placeholder="Ex.: a pergunta 4 tem um xingamento"></textarea>
+
+        <button type="submit" class="largo" id="botao-denunciar">Enviar denúncia</button>
+      </div>
+    </form>
+  </dialog>
+
   <div class="conteudo">
 
     <!--
@@ -332,6 +374,8 @@ async function identificar() {
   }
 
   desenharConta();
+  atenderPedidoDeDenuncia();
+  atenderPedidoDeApresentar();
 }
 
 function desenharConta() {
@@ -374,6 +418,93 @@ function pedirConta(motivo, depois) {
   $("motivo-login").textContent = motivo;
   $("erro-login").classList.add("escondido");
   mostrar("login");
+}
+
+// ============================================================
+// Denunciar
+// ============================================================
+
+const janelaDenuncia = $("janela-denuncia");
+let quizDenunciado = null;
+
+function abrirDenuncia(quizId, titulo) {
+  if (!eu) {
+    return pedirConta("Entre para denunciar um quiz.", () => abrirDenuncia(quizId, titulo));
+  }
+
+  quizDenunciado = quizId;
+  $("denuncia-titulo").textContent = titulo ? `“${titulo}”` : "";
+  $("formulario-denuncia").reset();
+  $("erro-denuncia").classList.add("escondido");
+  $("ok-denuncia").classList.add("escondido");
+  $("campos-denuncia").classList.remove("escondido");
+  $("botao-denunciar").disabled = false;
+  janelaDenuncia.showModal();
+}
+
+$("fechar-denuncia").addEventListener("click", () => janelaDenuncia.close());
+janelaDenuncia.addEventListener("click", (evento) => {
+  if (evento.target === janelaDenuncia) janelaDenuncia.close();
+});
+
+$("formulario-denuncia").addEventListener("submit", async (evento) => {
+  evento.preventDefault();
+
+  const motivo = new FormData(evento.target).get("motivo");
+  $("erro-denuncia").classList.add("escondido");
+  $("botao-denunciar").disabled = true;
+
+  try {
+    await pedir("POST", `/api/quizzes/${quizDenunciado}/denuncias`, {
+      motivo,
+      detalhe: $("detalhe-denuncia").value.trim() || undefined
+    });
+
+    $("campos-denuncia").classList.add("escondido");
+    $("ok-denuncia").classList.remove("escondido");
+    setTimeout(() => janelaDenuncia.close(), 2500);
+  } catch (erro) {
+    $("erro-denuncia").textContent = erro.message;
+    $("erro-denuncia").classList.remove("escondido");
+    $("botao-denunciar").disabled = false;
+  }
+});
+
+// Vindo do perfil, com ?apresentar=ID: abre a sala direto. É o
+// caminho para apresentar um RASCUNHO, que não está no catálogo
+// público e por isso não tem cartão aqui.
+const pedidoDeApresentar = Number(new URLSearchParams(location.search).get("apresentar")) || null;
+
+function atenderPedidoDeApresentar() {
+  if (!pedidoDeApresentar) return;
+  history.replaceState(null, "", "index.html");
+
+  // abrirSala desabilita o botão que a chamou; aqui não há botão,
+  // então vai um de mentira. Sem conta, ela mesma pede login.
+  abrirSala(pedidoDeApresentar, document.createElement("button"));
+}
+
+// Vindo da tela final de uma partida (jogar.html), com
+// ?denunciar=ID. Espera saber quem é: denunciar exige conta.
+const pedidoDeDenuncia = Number(new URLSearchParams(location.search).get("denunciar")) || null;
+
+async function atenderPedidoDeDenuncia() {
+  if (!pedidoDeDenuncia) return;
+
+  // Tira o parâmetro da URL: recarregar a página não deve abrir a
+  // janela de novo.
+  history.replaceState(null, "", "index.html");
+
+  try {
+    const { quiz } = await pedir("GET", `/api/quizzes/${pedidoDeDenuncia}`);
+    abrirDenuncia(quiz.id, quiz.titulo);
+  } catch {
+    // Rascunho jogado numa sala privada não está no catálogo, e
+    // denúncia é para o que está no catálogo.
+    $("erro-quizzes").textContent =
+      "Esse quiz não está no catálogo. Denúncias valem para quizzes publicados.";
+    $("erro-quizzes").classList.remove("escondido");
+  }
 }
 
 // ============================================================
@@ -730,6 +861,15 @@ function desenharDestaque() {
     editar.className = "pilula pilula-contorno";
     editar.textContent = "Editar";
     acoes.append(editar);
+  } else {
+    // Discreto de propósito: está ali para quem precisa, sem
+    // competir com "Abrir sala" pela atenção de quem não precisa.
+    const denunciar = document.createElement("button");
+    denunciar.type = "button";
+    denunciar.className = "botao-denunciar";
+    denunciar.textContent = "⚑ Denunciar";
+    denunciar.addEventListener("click", () => abrirDenuncia(quiz.id, quiz.titulo));
+    acoes.append(denunciar);
   }
 
   texto.append(linha, titulo, descricao, acoes);

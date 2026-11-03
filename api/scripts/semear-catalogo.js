@@ -642,8 +642,12 @@ async function semear() {
     // apareceria agrupado por categoria.
     for (const quiz of embaralhar(CATALOGO)) {
       const { rows: criados } = await cliente.query(
-        `INSERT INTO quizzes (usuario_id, titulo, descricao, categoria)
-         VALUES ($1, $2, $3, $4) RETURNING id`,
+        // Publicados direto, sem passar pela IA: é conteúdo do
+        // próprio projeto, escrito à mão. 'semente' no moderacao_por
+        // deixa isso registrado.
+        `INSERT INTO quizzes (usuario_id, titulo, descricao, categoria,
+                              situacao, moderacao_por, moderacao_em)
+         VALUES ($1, $2, $3, $4, 'publicado', 'semente', now()) RETURNING id`,
         [usuarioId, quiz.titulo, quiz.descricao, quiz.categoria]
       );
       const quizId = criados[0].id;

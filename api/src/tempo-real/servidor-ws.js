@@ -470,7 +470,9 @@ async function entrar(socket, { codigo: bruto, apelido, jogadorId: anterior }) {
   enviar(socket, {
     tipo: "bem-vindo",
     papel: "jogador",
-    sala: { codigo, titulo: sala.titulo, fase: sala.fase },
+    // O quiz vai junto para a tela final oferecer "Denunciar este
+    // quiz" — quem joga é quem mais vê o conteúdo de perto.
+    sala: { codigo, titulo: sala.titulo, fase: sala.fase, quizId: sala.quizId },
     voce: { id: jogadorId, apelido: limpo, retomou: Boolean(jaEstava) }
   });
 

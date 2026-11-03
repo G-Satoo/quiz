@@ -25,6 +25,9 @@ const router = Router();
  * O nome mostrado é o da conta, não o apelido da partida: a mesma
  * pessoa pode ter entrado como "Ana" numa sala e "aninha" noutra.
  *
+ * Só contam partidas de quiz publicado (aprovado pela moderação)
+ * na hora em que foram jogadas, e que continua publicado.
+ *
  * Empate fica com quem chegou ao total primeiro.
  */
 router.get("/hoje", async (req, res, next) => {
@@ -35,7 +38,12 @@ router.get("/hoje", async (req, res, next) => {
               COUNT(*)::int AS partidas
          FROM resultados r
          JOIN usuarios u ON u.id = r.usuario_id
+         -- Quiz tirado do ar leva os pontos junto: se era ruim o
+         -- bastante para sair do catálogo, não deveria ter rendido
+         -- ranking a ninguém.
+         JOIN quizzes q ON q.id = r.quiz_id AND q.situacao = 'publicado'
         WHERE r.terminado_em >= date_trunc('day', now())
+          AND r.vale_ranking
         GROUP BY u.id, u.nome
        HAVING SUM(r.pontos) > 0
         ORDER BY pontos DESC, MAX(r.terminado_em) ASC
