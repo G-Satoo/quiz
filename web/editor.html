@@ -73,7 +73,7 @@
 
         <div>
           <label for="quantidade">Quantas</label>
-          <input id="quantidade" type="number" min="1" max="20" value="5">
+          <input id="quantidade" type="number" min="1" max="20" value="10">
         </div>
 
         <div>
@@ -131,6 +131,10 @@ const $ = (id) => document.getElementById(id);
 
 const LIMITE_ALTERNATIVAS = 6;
 const MINIMO_ALTERNATIVAS = 2;
+
+// O mesmo mínimo do servidor (MIN_PERGUNTAS, em validacao.js).
+// Aqui é só para avisar antes; quem decide é o servidor.
+const MINIMO_PERGUNTAS = 10;
 
 // O id vem da URL: editor.html?id=3 edita, sem id cria do zero.
 const parametros = new URLSearchParams(location.search);
@@ -267,9 +271,17 @@ function desenhar() {
   const ativas = perguntas.filter((p) => p.ativa !== false).length;
   const desativadas = perguntas.length - ativas;
 
-  $("contagem-perguntas").textContent =
-    `${ativas} ativa${ativas === 1 ? "" : "s"} de 50` +
+  // Abaixo do mínimo, a contagem diz quanto falta em vez de "de
+  // 50": a pessoa precisa saber disso ANTES de clicar em salvar,
+  // não descobrir pela recusa.
+  const faltam = MINIMO_PERGUNTAS - ativas;
+  const contagem = $("contagem-perguntas");
+  contagem.textContent =
+    (faltam > 0
+      ? `${ativas} de ${MINIMO_PERGUNTAS} — falta${faltam === 1 ? "" : "m"} ${faltam}`
+      : `${ativas} ativa${ativas === 1 ? "" : "s"} de 50`) +
     (desativadas > 0 ? ` · ${desativadas} desativada${desativadas === 1 ? "" : "s"}` : "");
+  contagem.style.color = faltam > 0 ? "var(--alerta)" : "var(--texto-fraco)";
 
   $("botao-adicionar").disabled = perguntas.length >= 50;
 }
@@ -605,7 +617,7 @@ $("botao-gerar").addEventListener("click", async () => {
   try {
     const { perguntas: geradas, imagem, doCache } = await pedir("POST", "/api/geracao/perguntas", {
       tema,
-      quantidade: Number($("quantidade").value) || 5,
+      quantidade: Number($("quantidade").value) || 10,
       dificuldade: $("dificuldade").value
     });
 

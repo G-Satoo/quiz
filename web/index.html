@@ -543,6 +543,13 @@ $("formulario-login").addEventListener("submit", async (evento) => {
 // imagem — que uma capa ilustrada de "Naruto" levantaria.
 // ============================================================
 
+// O mesmo mínimo do servidor (MIN_PERGUNTAS, em validacao.js).
+// Abaixo dele a sala não abre, então o catálogo não oferece.
+const MINIMO_PERGUNTAS = 10;
+
+/** Dá para abrir sala com este quiz? */
+const jogavel = (quiz) => quiz.perguntas >= MINIMO_PERGUNTAS;
+
 const CATEGORIAS = {
   geral: "Geral", anime: "Anime", games: "Games", filmes: "Filmes",
   musica: "Música", esportes: "Esportes", historia: "História",
@@ -586,7 +593,7 @@ async function carregarQuizzes() {
     // de o destaque escolhido à mão ter ficado sem perguntas
     // desde então.
     const atual = todosOsQuizzes.find((q) => q.id === idDestaque);
-    if (!atual || atual.perguntas === 0) {
+    if (!atual || !jogavel(atual)) {
       idDestaque = eleitoParaDestaque()?.id ?? null;
     }
 
@@ -627,7 +634,7 @@ function eleitoParaDestaque() {
   // O fallback mantém a vitrine de pé num catálogo em que NENHUM
   // quiz tem pergunta: melhor mostrar o item desabilitado do que
   // abrir o site com um buraco onde deveria estar o banner.
-  const jogaveis = maisAcessados().filter((q) => q.perguntas > 0);
+  const jogaveis = maisAcessados().filter(jogavel);
   return jogaveis[0] ?? maisAcessados()[0];
 }
 
@@ -709,8 +716,8 @@ function desenharDestaque() {
   const jogar = document.createElement("button");
   jogar.className = "pilula pilula-cheia";
   jogar.innerHTML = '<span aria-hidden="true">▶</span>';
-  jogar.append(quiz.perguntas === 0 ? " Sem perguntas" : " Abrir sala");
-  jogar.disabled = quiz.perguntas === 0;
+  jogar.append(jogavel(quiz) ? " Abrir sala" : " Incompleto");
+  jogar.disabled = !jogavel(quiz);
   jogar.addEventListener("click", () => abrirSala(quiz.id, jogar));
   acoes.append(jogar);
 
@@ -1054,8 +1061,8 @@ function desenharCartao(quiz, estreito) {
   // clique frustrado num botão desabilitado sem explicação.
   const aviso = document.createElement("span");
   aviso.className = "selo-aviso";
-  aviso.textContent = "sem perguntas";
-  if (quiz.perguntas > 0) aviso.classList.add("escondido");
+  aviso.textContent = `${quiz.perguntas} de ${MINIMO_PERGUNTAS} perguntas`;
+  if (jogavel(quiz)) aviso.classList.add("escondido");
 
   const acoes = document.createElement("div");
   acoes.className = "acoes-capa";
@@ -1065,8 +1072,8 @@ function desenharCartao(quiz, estreito) {
   // dentro, com o código já no telão. Assim a ordem da tela
   // acompanha a ordem do que a pessoa realmente faz.
   const jogar = document.createElement("button");
-  jogar.textContent = quiz.perguntas === 0 ? "Sem perguntas" : "Abrir sala";
-  jogar.disabled = quiz.perguntas === 0;
+  jogar.textContent = jogavel(quiz) ? "Abrir sala" : "Incompleto";
+  jogar.disabled = !jogavel(quiz);
   jogar.addEventListener("click", () => abrirSala(quiz.id, jogar));
 
   acoes.append(jogar);

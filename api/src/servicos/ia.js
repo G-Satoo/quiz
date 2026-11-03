@@ -19,15 +19,15 @@
 // alternativa errada como correta só aparece com a sala inteira
 // respondendo. Por isso:
 //
-//   1. a saída passa pelo validarPerguntas(), as mesmas regras de
-//      uma pergunta digitada à mão;
+//   1. cada pergunta da saída passa pelo validarPergunta(), as
+//      mesmas regras de uma pergunta digitada à mão;
 //   2. o resultado vai para o RASCUNHO do editor, nunca direto
 //      para o banco — quem publica é a pessoa, depois de ler.
 // ============================================================
 
 import "dotenv/config";
 
-import { validarPerguntas } from "../util/validacao.js";
+import { validarPergunta } from "../util/validacao.js";
 
 const SEGUNDOS_PADRAO = 20;
 
@@ -360,7 +360,7 @@ export async function sugerirCapa(tema) {
   }
 }
 
-export async function gerarPerguntas({ tema, quantidade = 5, dificuldade = "medio" }) {
+export async function gerarPerguntas({ tema, quantidade = 10, dificuldade = "medio" }) {
   const provedor = process.env.IA_PROVEDOR || "falso";
   const implementacao = IMPLEMENTACOES[provedor];
 
@@ -394,7 +394,14 @@ export async function gerarPerguntas({ tema, quantidade = 5, dificuldade = "medi
 
   // A mesma validação de uma pergunta digitada à mão. Se a saída
   // do modelo não passar, ela não vale mais do que lixo digitado.
-  const erro = validarPerguntas(perguntas);
+  //
+  // Pergunta por pergunta, e NÃO a lista como um quiz: o mínimo de
+  // perguntas de um quiz não se aplica aqui. Gerar três serve para
+  // completar um quiz que já tem sete — e o mínimo é cobrado
+  // quando o quiz é salvo, que é onde ele faz sentido.
+  const erro = perguntas.length === 0
+    ? "nenhuma pergunta"
+    : perguntas.map((p, i) => validarPergunta(p, i)).find(Boolean);
 
   if (erro) {
     throw new ErroIA("invalida", `A IA devolveu perguntas fora do padrão (${erro}). Tente de novo.`);

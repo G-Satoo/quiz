@@ -198,6 +198,20 @@ export function validarPergunta(pergunta, posicao) {
 }
 
 /**
+ * Quantas perguntas ATIVAS um quiz precisa ter.
+ *
+ * Dez, por dois motivos. Uma partida de três perguntas acaba antes
+ * de a sala esquentar. E o ranking soma pontos, que crescem com o
+ * número de perguntas: com um piso comum, as partidas de quizzes
+ * diferentes ficam mais comparáveis.
+ *
+ * Exportada porque três lugares aplicam a mesma regra — salvar,
+ * bloquear e abrir sala —, e um número repetido em três arquivos
+ * é um número que um dia vai divergir.
+ */
+export const MIN_PERGUNTAS = 10;
+
+/**
  * Valida a lista inteira de perguntas de um quiz.
  */
 export function validarPerguntas(perguntas) {
@@ -215,7 +229,10 @@ export function validarPerguntas(perguntas) {
   // sala que termina na primeira tela.
   const ativas = perguntas.filter((p) => p.ativa !== false).length;
 
-  if (ativas === 0) return "Deixe pelo menos uma pergunta ativa";
+  if (ativas < MIN_PERGUNTAS) {
+    const faltam = MIN_PERGUNTAS - ativas;
+    return `O quiz precisa de pelo menos ${MIN_PERGUNTAS} perguntas ativas — falta${faltam === 1 ? "" : "m"} ${faltam}`;
+  }
 
   return null;
 }

@@ -12,6 +12,7 @@ import { after, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { prepararBanco, limpar, encerrarConexoes } from "../ajuda/banco.js";
+import { MIN_PERGUNTAS } from "../../src/util/validacao.js";
 import { subirServidor } from "../ajuda/servidor.js";
 import { pool } from "../../db/pool.js";
 
@@ -53,19 +54,40 @@ function pergunta(enunciado = "Qual a capital do Brasil?", segundos = 20) {
 /**
  * Cria um quiz pelo caminho normal.
  *
- * Toda criação leva pelo menos uma pergunta: o servidor recusa
- * quiz vazio, porque quiz sem pergunta não é um quiz incompleto
- * — é um quiz que não existe.
+ * Toda criação leva o mínimo de perguntas: o servidor recusa
+ * quiz abaixo dele, e quiz vazio nem chega a existir.
  */
 /** Só as perguntas ativas — é o que a partida enxerga. */
 function ativas(quiz) {
   return quiz.perguntas.filter((p) => p.ativa !== false);
 }
 
+/**
+ * Completa a lista até `total` com perguntas "Extra N".
+ *
+ * Todo quiz precisa de MIN_PERGUNTAS ativas. Os testes só se
+ * importam com uma ou duas delas; o resto é enchimento, e
+ * `principais` o ignora na hora de conferir.
+ *
+ * Para testar bloqueio, passe total acima do mínimo: num quiz com
+ * exatamente o mínimo, bloquear é (corretamente) recusado.
+ */
+function completar(perguntas, total = MIN_PERGUNTAS) {
+  const faltam = Math.max(0, total - perguntas.length);
+  return [...perguntas, ...Array.from({ length: faltam }, (_, i) => pergunta(`Extra ${i + 1}`))];
+}
+
+/** Enunciados ativos, sem o enchimento. */
+function principais(quiz) {
+  return ativas(quiz)
+    .map((p) => p.enunciado)
+    .filter((e) => !e.startsWith("Extra "));
+}
+
 async function criarQuiz(titulo = "Geografia") {
   const { dados } = await cliente.post("/api/quizzes", {
     titulo,
-    perguntas: [pergunta("Pergunta inicial")]
+    perguntas: completar([pergunta("Pergunta inicial")])
   });
   return dados.quiz;
 }
@@ -75,14 +97,31 @@ describe("POST /api/quizzes", () => {
     const resposta = await cliente.post("/api/quizzes", {
       titulo: "Geografia",
       descricao: "Capitais do mundo",
-      perguntas: [pergunta("Primeira"), pergunta("Segunda")]
+      perguntas: completar([pergunta("Primeira"), pergunta("Segunda")])
     });
 
     assert.equal(resposta.status, 201);
     assert.equal(resposta.dados.quiz.titulo, "Geografia");
 
     const { dados } = await cliente.get(`/api/quizzes/${resposta.dados.quiz.id}`);
-    assert.equal(dados.quiz.perguntas.length, 2);
+    assert.equal(dados.quiz.perguntas.length, MIN_PERGUNTAS);
+  });
+
+  it("recusa criar quiz com menos perguntas que o mínimo", async () => {
+    // Partida de três perguntas acaba antes de a sala esquentar,
+    // e o ranking soma pontos por pergunta: com um piso comum,
+    // partidas de quizzes diferentes ficam comparáveis.
+    const resposta = await cliente.post("/api/quizzes", {
+      titulo: "Curto demais",
+      perguntas: completar([], MIN_PERGUNTAS - 1)
+    });
+
+    assert.equal(resposta.status, 400);
+    assert.match(resposta.dados.erro, new RegExp(`pelo menos ${MIN_PERGUNTAS}`));
+    assert.match(resposta.dados.erro, /falta 1/);
+
+    const { dados } = await cliente.get("/api/quizzes");
+    assert.equal(dados.quizzes.length, 0);
   });
 
   it("recusa criar quiz sem pergunta nenhuma", async () => {
@@ -107,7 +146,7 @@ describe("POST /api/quizzes", () => {
 
     const resposta = await cliente.post("/api/quizzes", {
       titulo: "Não deveria existir",
-      perguntas: [ruim]
+      perguntas: completar([ruim])
     });
 
     assert.equal(resposta.status, 400);
@@ -132,13 +171,13 @@ describe("GET /api/quizzes", () => {
   it("lista com a contagem de perguntas", async () => {
     const quiz = await criarQuiz();
     await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: [pergunta(), pergunta("Qual o maior rio?")]
+      perguntas: completar([pergunta(), pergunta("Qual o maior rio?")], MIN_PERGUNTAS + 2)
     });
 
     const resposta = await cliente.get("/api/quizzes");
 
     assert.equal(resposta.dados.quizzes.length, 1);
-    assert.equal(resposta.dados.quizzes[0].perguntas, 2);
+    assert.equal(resposta.dados.quizzes[0].perguntas, MIN_PERGUNTAS + 2);
   });
 
   it("abre para visitante, sem login", async () => {
@@ -237,8 +276,9 @@ describe("GET /api/quizzes/:id", () => {
   it("visitante não vê pergunta bloqueada", async () => {
     const quiz = await criarQuiz();
 
+    // Uma acima do mínimo, para o bloqueio ser aceito.
     await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: [pergunta("Fica"), pergunta("Sai")]
+      perguntas: completar([pergunta("Fica"), pergunta("Sai")], MIN_PERGUNTAS + 1)
     });
 
     const { dados: antes } = await cliente.get(`/api/quizzes/${quiz.id}`);
@@ -251,7 +291,8 @@ describe("GET /api/quizzes/:id", () => {
     cliente.esquecerCookie();
     const { dados } = await cliente.get(`/api/quizzes/${quiz.id}`);
 
-    assert.deepEqual(dados.quiz.perguntas.map((p) => p.enunciado), ["Fica"]);
+    assert.deepEqual(principais(dados.quiz), ["Fica"]);
+    assert.equal(dados.quiz.perguntas.length, MIN_PERGUNTAS);
   });
 });
 
@@ -260,15 +301,14 @@ describe("PUT /api/quizzes/:id/perguntas", () => {
     const quiz = await criarQuiz();
 
     const resposta = await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: [pergunta("Primeira"), pergunta("Segunda"), pergunta("Terceira")]
+      perguntas: completar([pergunta("Primeira"), pergunta("Segunda"), pergunta("Terceira")])
     });
 
     assert.equal(resposta.status, 200);
 
     const { dados } = await cliente.get(`/api/quizzes/${quiz.id}`);
-    const enunciados = ativas(dados.quiz).map((p) => p.enunciado);
 
-    assert.deepEqual(enunciados, ["Primeira", "Segunda", "Terceira"]);
+    assert.deepEqual(principais(dados.quiz), ["Primeira", "Segunda", "Terceira"]);
     assert.equal(ativas(dados.quiz)[0].alternativas.length, 3);
     assert.equal(ativas(dados.quiz)[0].alternativas[0].correta, true);
   });
@@ -280,17 +320,17 @@ describe("PUT /api/quizzes/:id/perguntas", () => {
     const quiz = await criarQuiz();
 
     await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: [pergunta("Antiga 1"), pergunta("Antiga 2")]
+      perguntas: completar([pergunta("Antiga 1"), pergunta("Antiga 2")])
     });
 
     await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: [pergunta("Nova única")]
+      perguntas: completar([pergunta("Nova única")])
     });
 
     const { dados } = await cliente.get(`/api/quizzes/${quiz.id}`);
 
-    // Para a partida, só a nova.
-    assert.deepEqual(ativas(dados.quiz).map((p) => p.enunciado), ["Nova única"]);
+    // Para a partida, só a nova (mais o enchimento).
+    assert.deepEqual(principais(dados.quiz), ["Nova única"]);
 
     // Mas as antigas continuam no banco, desativadas.
     const desativadas = dados.quiz.perguntas
@@ -305,7 +345,7 @@ describe("PUT /api/quizzes/:id/perguntas", () => {
     const quiz = await criarQuiz();
 
     await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: [pergunta("Vai e volta"), pergunta("Fica")]
+      perguntas: completar([pergunta("Vai e volta"), pergunta("Fica")], MIN_PERGUNTAS + 1)
     });
 
     const { dados: antes } = await cliente.get(`/api/quizzes/${quiz.id}`);
@@ -345,20 +385,42 @@ describe("PUT /api/quizzes/:id/perguntas", () => {
     assert.equal(resposta.status, 400);
   });
 
+  it("recusa salvar com menos perguntas ativas que o mínimo", async () => {
+    const quiz = await criarQuiz();
+
+    const resposta = await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
+      perguntas: completar([], MIN_PERGUNTAS - 1)
+    });
+
+    assert.equal(resposta.status, 400);
+    assert.match(resposta.dados.erro, new RegExp(`pelo menos ${MIN_PERGUNTAS}`));
+  });
+
+  it("desativadas não contam para o mínimo", async () => {
+    // Doze na lista, mas três desativadas: sobram nove ativas, e
+    // é isso que a partida teria.
+    const quiz = await criarQuiz();
+
+    const lista = completar([], MIN_PERGUNTAS + 2).map((p, i) => ({ ...p, ativa: i >= 3 }));
+
+    const resposta = await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, { perguntas: lista });
+    assert.equal(resposta.status, 400);
+  });
+
   it("a contagem do catálogo conta só as ativas", async () => {
     const quiz = await criarQuiz();
 
     await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: [pergunta("Uma"), pergunta("Duas"), pergunta("Três")]
+      perguntas: completar([pergunta("Uma")], MIN_PERGUNTAS + 3)
     });
 
-    // Some com duas: elas viram desativadas.
+    // Troca a lista: as treze anteriores viram desativadas.
     await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: [pergunta("Só esta")]
+      perguntas: completar([pergunta("Só esta")])
     });
 
     const { dados } = await cliente.get("/api/quizzes");
-    assert.equal(dados.quizzes[0].perguntas, 1);
+    assert.equal(dados.quizzes[0].perguntas, MIN_PERGUNTAS);
   });
 
   it("um PUT recusado não apaga as perguntas que já estavam salvas", async () => {
@@ -368,22 +430,21 @@ describe("PUT /api/quizzes/:id/perguntas", () => {
     const quiz = await criarQuiz();
 
     await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: [pergunta("Original A"), pergunta("Original B")]
+      perguntas: completar([pergunta("Original A"), pergunta("Original B")])
     });
 
     const ruim = pergunta("Esta não vale");
     ruim.alternativas = [{ texto: "Única", correta: true }]; // mínimo são 2
 
     const resposta = await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: [pergunta("Nova 1"), ruim]
+      perguntas: completar([pergunta("Nova 1"), ruim])
     });
 
     assert.equal(resposta.status, 400);
 
     const { dados } = await cliente.get(`/api/quizzes/${quiz.id}`);
-    const enunciados = ativas(dados.quiz).map((p) => p.enunciado);
 
-    assert.deepEqual(enunciados, ["Original A", "Original B"]);
+    assert.deepEqual(principais(dados.quiz), ["Original A", "Original B"]);
   });
 
   it("recusa pergunta sem alternativa correta", async () => {
@@ -393,7 +454,7 @@ describe("PUT /api/quizzes/:id/perguntas", () => {
     semCorreta.alternativas = semCorreta.alternativas.map((a) => ({ ...a, correta: false }));
 
     const resposta = await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: [semCorreta]
+      perguntas: completar([semCorreta])
     });
 
     assert.equal(resposta.status, 400);
@@ -407,7 +468,7 @@ describe("PUT /api/quizzes/:id/perguntas", () => {
     duasCorretas.alternativas[1].correta = true;
 
     const resposta = await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: [duasCorretas]
+      perguntas: completar([duasCorretas])
     });
 
     assert.equal(resposta.status, 400);
@@ -421,7 +482,7 @@ describe("PUT /api/quizzes/:id/perguntas", () => {
     ruim.segundos = 1;
 
     const resposta = await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: [pergunta(), pergunta(), ruim]
+      perguntas: completar([pergunta(), pergunta(), ruim])
     });
 
     assert.equal(resposta.status, 400);
@@ -439,7 +500,7 @@ describe("PUT /api/quizzes/:id/perguntas", () => {
     });
 
     const resposta = await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: [pergunta()]
+      perguntas: completar([pergunta()])
     });
 
     assert.equal(resposta.status, 404);
@@ -453,7 +514,7 @@ describe("PATCH /api/quizzes/:id/perguntas/:perguntaId", () => {
     const quiz = await criarQuiz();
 
     await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: [pergunta("Fica"), pergunta("Sai")]
+      perguntas: completar([pergunta("Fica"), pergunta("Sai")], MIN_PERGUNTAS + 1)
     });
 
     const { dados: antes } = await cliente.get(`/api/quizzes/${quiz.id}`);
@@ -467,14 +528,14 @@ describe("PATCH /api/quizzes/:id/perguntas/:perguntaId", () => {
     assert.equal(resposta.status, 200);
 
     const { dados } = await cliente.get(`/api/quizzes/${quiz.id}`);
-    assert.deepEqual(ativas(dados.quiz).map((p) => p.enunciado), ["Fica"]);
+    assert.deepEqual(principais(dados.quiz), ["Fica"]);
   });
 
   it("desbloqueia de volta", async () => {
     const quiz = await criarQuiz();
 
     await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: [pergunta("Uma"), pergunta("Outra")]
+      perguntas: completar([pergunta("Uma"), pergunta("Outra")], MIN_PERGUNTAS + 1)
     });
 
     const { dados: antes } = await cliente.get(`/api/quizzes/${quiz.id}`);
@@ -484,31 +545,35 @@ describe("PATCH /api/quizzes/:id/perguntas/:perguntaId", () => {
     await cliente.patch(`/api/quizzes/${quiz.id}/perguntas/${alvo.id}`, { ativa: true });
 
     const { dados } = await cliente.get(`/api/quizzes/${quiz.id}`);
-    assert.equal(ativas(dados.quiz).length, 2);
+    assert.equal(ativas(dados.quiz).length, MIN_PERGUNTAS + 1);
   });
 
-  it("recusa bloquear a última pergunta ativa", async () => {
-    // Um quiz sem pergunta abriria uma sala que termina na
-    // primeira tela.
-    const quiz = await criarQuiz();
+  it("recusa bloquear quando o quiz ficaria abaixo do mínimo", async () => {
+    // Num quiz travado (já apresentado) não dá para acrescentar
+    // pergunta: deixar bloquear abaixo do mínimo o deixaria sem
+    // abrir sala para sempre.
+    const quiz = await criarQuiz(); // exatamente o mínimo
 
     const { dados: antes } = await cliente.get(`/api/quizzes/${quiz.id}`);
-    const unica = ativas(antes.quiz)[0];
+    const qualquer = ativas(antes.quiz)[0];
 
     const resposta = await cliente.patch(
-      `/api/quizzes/${quiz.id}/perguntas/${unica.id}`,
+      `/api/quizzes/${quiz.id}/perguntas/${qualquer.id}`,
       { ativa: false }
     );
 
     assert.equal(resposta.status, 400);
-    assert.match(resposta.dados.erro, /última pergunta ativa/);
+    assert.match(resposta.dados.erro, new RegExp(`pelo menos ${MIN_PERGUNTAS}`));
+
+    const { dados } = await cliente.get(`/api/quizzes/${quiz.id}`);
+    assert.equal(ativas(dados.quiz).length, MIN_PERGUNTAS);
   });
 
   it("não bloqueia pergunta de quiz de outra pessoa", async () => {
     const quiz = await criarQuiz();
 
     await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: [pergunta("Uma"), pergunta("Outra")]
+      perguntas: completar([pergunta("Uma"), pergunta("Outra")], MIN_PERGUNTAS + 1)
     });
 
     const { dados: antes } = await cliente.get(`/api/quizzes/${quiz.id}`);
@@ -537,7 +602,7 @@ describe("POST /api/quizzes/:id/copia", () => {
     const quiz = await criarQuiz("Geografia");
 
     await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: [pergunta("Uma"), pergunta("Duas")]
+      perguntas: completar([pergunta("Uma"), pergunta("Duas")])
     });
 
     const resposta = await cliente.post(`/api/quizzes/${quiz.id}/copia`);
@@ -547,9 +612,9 @@ describe("POST /api/quizzes/:id/copia", () => {
     assert.notEqual(resposta.dados.quiz.id, quiz.id);
 
     const { dados } = await cliente.get(`/api/quizzes/${resposta.dados.quiz.id}`);
-    const enunciados = ativas(dados.quiz).map((p) => p.enunciado);
 
-    assert.deepEqual(enunciados, ["Uma", "Duas"]);
+    assert.deepEqual(principais(dados.quiz), ["Uma", "Duas"]);
+    assert.equal(dados.quiz.perguntas.length, MIN_PERGUNTAS);
     assert.equal(ativas(dados.quiz)[0].alternativas.length, 3);
     assert.equal(ativas(dados.quiz)[0].alternativas[0].correta, true);
   });
@@ -576,18 +641,18 @@ describe("POST /api/quizzes/:id/copia", () => {
     const quiz = await criarQuiz();
 
     await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: [pergunta("Original")]
+      perguntas: completar([pergunta("Original")])
     });
 
     const { dados: copia } = await cliente.post(`/api/quizzes/${quiz.id}/copia`);
 
     await cliente.put(`/api/quizzes/${copia.quiz.id}/perguntas`, {
-      perguntas: [pergunta("Mexida"), pergunta("Outra mexida")]
+      perguntas: completar([pergunta("Mexida"), pergunta("Outra mexida")])
     });
 
     const { dados } = await cliente.get(`/api/quizzes/${quiz.id}`);
 
-    assert.deepEqual(ativas(dados.quiz).map((p) => p.enunciado), ["Original"]);
+    assert.deepEqual(principais(dados.quiz), ["Original"]);
   });
 
   it("não copia as perguntas desativadas", async () => {
@@ -596,17 +661,19 @@ describe("POST /api/quizzes/:id/copia", () => {
     const quiz = await criarQuiz();
 
     await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: [pergunta("Fica"), pergunta("Sai")]
+      perguntas: completar([pergunta("Fica"), pergunta("Sai")])
     });
 
+    // Lista nova inteira: as dez anteriores viram desativadas, e o
+    // original passa a ter trinta linhas, das quais dez ativas.
     await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, {
-      perguntas: [pergunta("Fica")]
+      perguntas: completar([pergunta("Fica")])
     });
 
     const { dados: copia } = await cliente.post(`/api/quizzes/${quiz.id}/copia`);
     const { dados } = await cliente.get(`/api/quizzes/${copia.quiz.id}`);
 
-    assert.equal(dados.quiz.perguntas.length, 1);
+    assert.equal(dados.quiz.perguntas.length, MIN_PERGUNTAS);
   });
 
   it("copia o quiz de outra pessoa, e a cópia nasce no nome de quem copiou", async () => {
@@ -649,7 +716,7 @@ describe("POST /api/quizzes/:id/copia", () => {
 describe("DELETE /api/quizzes/:id", () => {
   it("apaga o quiz com perguntas e alternativas", async () => {
     const quiz = await criarQuiz();
-    await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, { perguntas: [pergunta()] });
+    await cliente.put(`/api/quizzes/${quiz.id}/perguntas`, { perguntas: completar([pergunta()]) });
 
     const resposta = await cliente.delete(`/api/quizzes/${quiz.id}`);
     assert.equal(resposta.status, 204);

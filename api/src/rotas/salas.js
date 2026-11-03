@@ -17,7 +17,7 @@ import { pool } from "../../db/pool.js";
 import { exigirLogin } from "../middlewares/autenticacao.js";
 import { limitar } from "../middlewares/limite.js";
 import { gerarCodigo, normalizarCodigo } from "../util/codigo.js";
-import { lerInteiro } from "../util/validacao.js";
+import { lerInteiro, MIN_PERGUNTAS } from "../util/validacao.js";
 import * as salas from "../tempo-real/salas.js";
 
 const router = Router();
@@ -98,11 +98,14 @@ router.post(
         return res.status(404).json({ erro: "Quiz não encontrado" });
       }
 
-      // Abrir sala de um quiz vazio só geraria uma partida que
-      // termina na primeira tela. Barrar aqui é mais gentil do
-      // que deixar 20 pessoas entrarem para nada.
-      if (rows[0].perguntas === 0) {
-        return res.status(400).json({ erro: "Este quiz ainda não tem perguntas" });
+      // Salvar já exige o mínimo, mas quiz antigo (de antes da
+      // regra) pode estar abaixo dele. Barrar aqui é mais gentil
+      // do que deixar 20 pessoas entrarem numa partida curta — e
+      // mantém o ranking justo, que soma pontos por pergunta.
+      if (rows[0].perguntas < MIN_PERGUNTAS) {
+        return res.status(400).json({
+          erro: `Este quiz tem ${rows[0].perguntas} pergunta(s) ativa(s); são precisas pelo menos ${MIN_PERGUNTAS}`
+        });
       }
 
       // Abrir uma sala é o evento que mede popularidade aqui.

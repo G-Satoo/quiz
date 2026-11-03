@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import { prepararBanco, limpar, encerrarConexoes } from "../ajuda/banco.js";
 import { subirServidor } from "../ajuda/servidor.js";
 import { conectar } from "../ajuda/cliente-ws.js";
+import { MIN_PERGUNTAS } from "../../src/util/validacao.js";
 
 let servidor;
 let cliente;
@@ -59,8 +60,25 @@ async function abrir(opcoes) {
   return conexao;
 }
 
+// Quantas perguntas a partida de teste tem: o mínimo exigido.
+// As duas primeiras são as que os testes examinam; o resto é
+// enchimento para o quiz poder existir.
+const TOTAL = MIN_PERGUNTAS;
+
+/** Perguntas de enchimento, depois das duas que os testes olham. */
+function enchimento(quantas) {
+  return Array.from({ length: quantas }, (_, i) => ({
+    enunciado: `Extra ${i + 1}`,
+    segundos: 5,
+    alternativas: [
+      { texto: "Certa", correta: true },
+      { texto: "Errada", correta: false }
+    ]
+  }));
+}
+
 /**
- * Monta um quiz de duas perguntas e abre a sala.
+ * Monta um quiz com o mínimo de perguntas e abre a sala.
  *
  * Tempo curto (5 segundos, o mínimo que o banco aceita) para o
  * teste do tempo esgotado não demorar meio minuto.
@@ -85,7 +103,8 @@ async function prepararPartida() {
           { texto: "Nilo", correta: false },
           { texto: "Amazonas", correta: true }
         ]
-      }
+      },
+      ...enchimento(TOTAL - 2)
     ]
   });
 
@@ -119,7 +138,7 @@ describe("começar a partida", () => {
     assert.equal(paraOHost.enunciado, "Capital do Brasil?");
     assert.equal(paraAna.enunciado, "Capital do Brasil?");
     assert.equal(paraAna.indice, 0);
-    assert.equal(paraAna.total, 2);
+    assert.equal(paraAna.total, TOTAL);
   });
 
   it("NUNCA manda qual alternativa é a correta", async () => {
@@ -377,14 +396,14 @@ describe("avançar e terminar", () => {
     const { codigo, host } = await prepararPartida();
     const ana = await entrarJogador(codigo, "Ana");
 
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < TOTAL; i++) {
       host.enviar(i === 0 ? { tipo: "comecar" } : { tipo: "proxima" });
 
       const pergunta = await ana.esperar("pergunta");
       ana.enviar({ tipo: "responder", alternativaId: pergunta.alternativas[0].id });
 
       const resultado = await host.esperar("resultado");
-      assert.equal(resultado.ultima, i === 1);
+      assert.equal(resultado.ultima, i === TOTAL - 1);
     }
 
     host.enviar({ tipo: "proxima" });
@@ -394,9 +413,9 @@ describe("avançar e terminar", () => {
   });
 });
 
-/** Joga as duas perguntas com todos respondendo a primeira alternativa. */
+/** Joga todas as perguntas com todos respondendo a primeira alternativa. */
 async function jogarAteOFim(host, jogadores) {
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < TOTAL; i++) {
     host.enviar(i === 0 ? { tipo: "comecar" } : { tipo: "proxima" });
 
     for (const jogador of jogadores) {

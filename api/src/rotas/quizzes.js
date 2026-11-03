@@ -27,7 +27,8 @@ import {
   validarTitulo,
   validarCategoria,
   validarIcone,
-  validarPerguntas
+  validarPerguntas,
+  MIN_PERGUNTAS
 } from "../util/validacao.js";
 
 const router = Router();
@@ -422,11 +423,12 @@ router.patch("/:id/perguntas/:perguntaId", exigirLogin, async (req, res, next) =
       return res.status(404).json({ erro: "Pergunta não encontrada" });
     }
 
-    // Bloquear a última ativa deixaria o quiz abrindo uma sala
-    // que termina na primeira tela.
-    if (!ativa && donas[0].ativas <= 1) {
+    // Bloquear abaixo do mínimo deixaria o quiz sem poder abrir
+    // sala. Num quiz travado — que não aceita pergunta nova —
+    // isso não teria volta, então a recusa vem antes.
+    if (!ativa && donas[0].ativas <= MIN_PERGUNTAS) {
       return res.status(400).json({
-        erro: "Esta é a última pergunta ativa. O quiz precisa de pelo menos uma."
+        erro: `O quiz precisa de pelo menos ${MIN_PERGUNTAS} perguntas ativas. Desbloqueie outra antes de bloquear esta.`
       });
     }
 

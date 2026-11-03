@@ -12,6 +12,8 @@ import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { prepararBanco, limpar, encerrarConexoes } from "../ajuda/banco.js";
+import { MIN_PERGUNTAS } from "../../src/util/validacao.js";
+import { pool } from "../../db/pool.js";
 import { subirServidor } from "../ajuda/servidor.js";
 import { conectar } from "../ajuda/cliente-ws.js";
 import { redis } from "../../src/redis.js";
@@ -71,16 +73,16 @@ async function abrir(opcoes) {
 async function criarSala() {
   const { dados: criado } = await cliente.post("/api/quizzes", {
     titulo: "Geografia",
-    perguntas: [
-      {
-        enunciado: "Capital do Brasil?",
-        segundos: 20,
-        alternativas: [
-          { texto: "Brasília", correta: true },
-          { texto: "São Paulo", correta: false }
-        ]
-      }
-    ]
+    // O mínimo exigido. A sala aqui não chega a jogar, então as
+    // perguntas podem ser todas iguais.
+    perguntas: Array.from({ length: MIN_PERGUNTAS }, (_, i) => ({
+      enunciado: `Capital do Brasil? (${i + 1})`,
+      segundos: 20,
+      alternativas: [
+        { texto: "Brasília", correta: true },
+        { texto: "São Paulo", correta: false }
+      ]
+    }))
   });
 
   const { dados } = await cliente.post("/api/salas", { quiz_id: criado.quiz.id });
@@ -117,6 +119,23 @@ describe("POST /api/salas", () => {
 
     const resposta = await cliente.post("/api/salas", { quiz_id: sala.quizId });
     assert.equal(resposta.status, 201);
+  });
+
+  it("recusa abrir sala de quiz antigo, abaixo do mínimo", async () => {
+    // Salvar já exige o mínimo; isto protege quiz de antes da
+    // regra. Simula um com uma pergunta a menos direto no banco.
+    const sala = await criarSala();
+
+    await pool.query(
+      `UPDATE perguntas SET ativa = FALSE
+        WHERE id = (SELECT id FROM perguntas WHERE quiz_id = $1 ORDER BY ordem LIMIT 1)`,
+      [sala.quizId]
+    );
+
+    const resposta = await cliente.post("/api/salas", { quiz_id: sala.quizId });
+
+    assert.equal(resposta.status, 400);
+    assert.match(resposta.dados.erro, new RegExp(`pelo menos ${MIN_PERGUNTAS}`));
   });
 
   it("exige login para abrir sala", async () => {

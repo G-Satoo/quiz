@@ -33,8 +33,11 @@ router.use(exigirLogin);
 // mesmo tema de novo não deve gastar cota por isso.
 const VALIDADE_CACHE = 7 * 24 * 60 * 60;
 
-const MIN_PERGUNTAS = 1;
-const MAX_PERGUNTAS = 20;
+// Quantas pedir DE UMA VEZ. Não é o mínimo de um quiz (esse
+// fica em validacao.js): gerar poucas serve para completar um
+// quiz que já tem algumas.
+const MIN_POR_GERACAO = 1;
+const MAX_POR_GERACAO = 20;
 
 /**
  * A chave do cache é o pedido inteiro, resumido em hash.
@@ -81,9 +84,10 @@ router.post(
       }
 
       const quantidade = lerInteiro(req.body?.quantidade, {
-        padrao: 5,
-        minimo: MIN_PERGUNTAS,
-        maximo: MAX_PERGUNTAS
+        // Dez de uma vez completam um quiz novo no mínimo exigido.
+        padrao: 10,
+        minimo: MIN_POR_GERACAO,
+        maximo: MAX_POR_GERACAO
       });
 
       const pedido = { tema: tema.trim(), quantidade, dificuldade };
