@@ -12,6 +12,7 @@ import { createHash } from "node:crypto";
 
 import { Router } from "express";
 
+import { pool } from "../../db/pool.js";
 import { redis } from "../redis.js";
 import { exigirLogin } from "../middlewares/autenticacao.js";
 import { limitar } from "../middlewares/limite.js";
@@ -38,6 +39,11 @@ const VALIDADE_CACHE = 7 * 24 * 60 * 60;
 // quiz que já tem algumas.
 const MIN_POR_GERACAO = 1;
 const MAX_POR_GERACAO = 20;
+
+// Quantas perguntas existentes vão no pedido, para a IA não
+// repetir. As mais recentes bastam: o pedido não pode crescer sem
+// fim (cada palavra custa cota), e o editor descarta o resto.
+const MAX_EVITAR = 150;
 
 /**
  * A chave do cache é o pedido inteiro, resumido em hash.
@@ -69,7 +75,20 @@ router.post(
   limitar({ nome: "gerar-ia", max: 20, janela: 60 * 60, chave: (req) => req.usuarioId }),
   async (req, res, next) => {
     try {
-      const { tema, dificuldade = "medio" } = req.body ?? {};
+      let { tema, dificuldade = "medio" } = req.body ?? {};
+
+      // Gerando para um quiz que já tem tema, o tema é o dele — não
+      // o que veio no pedido. É o que impede um quiz de Naruto de
+      // receber perguntas de futebol (a tela trava o campo; isto
+      // vale para quem chama a API direto).
+      const quizId = lerInteiro(req.body?.quizId, { padrao: null, minimo: 1, maximo: 2147483647 });
+      if (quizId !== null) {
+        const { rows } = await pool.query(
+          "SELECT tema FROM quizzes WHERE id = $1 AND usuario_id = $2",
+          [quizId, req.usuarioId]
+        );
+        if (rows[0]?.tema) tema = rows[0].tema;
+      }
 
       if (typeof tema !== "string" || tema.trim().length < 2) {
         return res.status(400).json({ erro: "Escreva o tema do quiz" });
@@ -90,12 +109,21 @@ router.post(
         maximo: MAX_POR_GERACAO
       });
 
-      const pedido = { tema: tema.trim(), quantidade, dificuldade };
+      // As perguntas que o quiz já tem: a IA precisa saber, senão
+      // devolve as mesmas de sempre.
+      const evitar = (Array.isArray(req.body?.evitar) ? req.body.evitar : [])
+        .filter((e) => typeof e === "string" && e.trim() !== "")
+        .map((e) => e.trim().slice(0, 300))
+        .slice(-MAX_EVITAR);
+
+      const pedido = { tema: tema.trim(), quantidade, dificuldade, evitar };
       const chave = chaveDoCache(pedido);
 
       // ----- já geramos isto antes? -----
+      // Só para quiz começando do zero. Com perguntas a evitar, a
+      // resposta guardada é justamente a que já está no quiz.
       try {
-        const guardado = await redis.get(chave);
+        const guardado = evitar.length === 0 ? await redis.get(chave) : null;
 
         if (guardado) {
           const antigo = JSON.parse(guardado);
@@ -128,7 +156,9 @@ router.post(
       const icone = capa.icone;
 
       try {
-        await redis.set(chave, JSON.stringify({ perguntas, icone, imagem }), "EX", VALIDADE_CACHE);
+        if (evitar.length === 0) {
+          await redis.set(chave, JSON.stringify({ perguntas, icone, imagem }), "EX", VALIDADE_CACHE);
+        }
       } catch {
         // idem: não conseguir cachear não invalida o resultado.
       }

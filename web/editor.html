@@ -176,6 +176,13 @@
         <button id="botao-gerar">Gerar</button>
       </div>
 
+      <!-- Fora da linha dos campos: dentro, ele esticaria só a coluna
+           do tema e desalinharia Quantas, Nível e Gerar. -->
+      <p class="dica-campo escondido" id="dica-tema">
+        O tema deste quiz é fixo: gerar de novo traz mais perguntas sobre ele.
+        Para outro assunto, crie um quiz novo.
+      </p>
+
       <p class="nota-gerador">
         A IA erra. As perguntas entram aqui embaixo como rascunho — leia e corrija
         antes de salvar.
@@ -336,6 +343,18 @@ let travado = false;
 // apresentar, não para editar. Quem quiser mudar duplica.
 let somenteLeitura = false;
 let autor = null;
+
+// O tema do quiz: definido na primeira geração e fixo dali em diante
+// (migração 018). Nulo enquanto o quiz nunca usou o gerador.
+let temaFixo = null;
+
+function travarTema(tema) {
+  temaFixo = tema;
+  $("tema").value = tema;
+  $("tema").readOnly = true;
+  $("tema").title = "O tema deste quiz não muda";
+  $("dica-tema").classList.remove("escondido");
+}
 
 // Montar a partida. Declarados aqui em cima porque o desenho das
 // perguntas, que roda já no carregamento, atualiza a estimativa.
@@ -634,6 +653,7 @@ if (quizId) {
 
     somenteLeitura = quiz.meu !== true;
     autor = quiz.autor ?? null;
+    if (quiz.tema) travarTema(quiz.tema);
 
     travado = somenteLeitura || (quiz.partidas ?? 0) > 0 || situacao === "publicado";
     if (travado) aplicarTrava();
@@ -1043,7 +1063,12 @@ $("botao-gerar").addEventListener("click", async () => {
     const { perguntas: geradas, imagem, doCache } = await pedir("POST", "/api/geracao/perguntas", {
       tema,
       quantidade: Number($("quantidade").value) || 10,
-      dificuldade: $("dificuldade").value
+      dificuldade: $("dificuldade").value,
+      // Quiz salvo com tema: o servidor usa o dele, não o do campo.
+      quizId: quizId ?? undefined,
+      // O que o quiz já tem (inclusive fora da partida), para a IA
+      // trazer perguntas novas em vez das mesmas de sempre.
+      evitar: perguntas.map((p) => p.enunciado.trim()).filter(Boolean)
     });
 
     // Se o rascunho só tem a pergunta vazia inicial, substitui.
@@ -1069,6 +1094,9 @@ $("botao-gerar").addEventListener("click", async () => {
       return true;
     });
     const descartadas = geradas.length - novas.length;
+
+    // A primeira geração define o tema do quiz.
+    if (!temaFixo) travarTema(tema);
 
     perguntas = soTemVazia ? novas : [...perguntas, ...novas];
 
@@ -1147,7 +1175,8 @@ async function salvar({ avisar = true } = {}) {
     const dados = {
       titulo,
       descricao: $("descricao").value.trim(),
-      categoria: $("categoria").value
+      categoria: $("categoria").value,
+      tema: temaFixo ?? undefined
     };
 
     if (quizId) {

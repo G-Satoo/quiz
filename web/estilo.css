@@ -2198,3 +2198,7 @@ button.botao-acao.discreto { border: 1px solid var(--borda); }
   color: var(--erro);
 }
 .acoes-meu button.botao-apagar:hover { text-decoration: underline; filter: none; }
+
+/* Tema fixo do quiz: dá para ler, não para trocar. */
+#tema[readonly] { opacity: 0.7; cursor: not-allowed; }
+#dica-tema { margin: 8px 0 0; }

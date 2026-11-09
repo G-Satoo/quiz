@@ -1509,3 +1509,52 @@ describe("perfil editável", () => {
     assert.equal(servido.status, 200);
   });
 });
+
+describe("tema do quiz", () => {
+  async function criarComTema(tema) {
+    const { dados } = await cliente.post("/api/quizzes", {
+      titulo: "Ninjas",
+      tema,
+      perguntas: completar([pergunta("Pergunta inicial")])
+    });
+    return dados.quiz;
+  }
+
+  it("é salvo na criação e não muda mais", async () => {
+    const quiz = await criarComTema("Naruto");
+    assert.equal(quiz.tema, "Naruto");
+
+    const { dados } = await cliente.patch(`/api/quizzes/${quiz.id}`, { tema: "Futebol" });
+    assert.equal(dados.quiz.tema, "Naruto");
+
+    const { dados: lido } = await cliente.get(`/api/quizzes/${quiz.id}`);
+    assert.equal(lido.quiz.tema, "Naruto");
+  });
+
+  it("quiz sem tema recebe o da primeira geração", async () => {
+    const quiz = await criarQuiz();
+    assert.equal(quiz.tema, null);
+
+    const { dados } = await cliente.patch(`/api/quizzes/${quiz.id}`, { tema: "Capitais" });
+    assert.equal(dados.quiz.tema, "Capitais");
+  });
+
+  it("gerar para o quiz usa o tema dele, não o do pedido", async () => {
+    const quiz = await criarComTema("Naruto");
+
+    const { dados } = await cliente.post("/api/geracao/perguntas", {
+      tema: "Futebol",
+      quantidade: 2,
+      quizId: quiz.id
+    });
+
+    // O provedor falso escreve o tema no enunciado.
+    assert.ok(dados.perguntas.every((p) => p.enunciado.includes("Naruto")), JSON.stringify(dados.perguntas));
+  });
+
+  it("a cópia herda o tema", async () => {
+    const quiz = await criarComTema("Naruto");
+    const { dados } = await cliente.post(`/api/quizzes/${quiz.id}/copia`);
+    assert.equal(dados.quiz.tema, "Naruto");
+  });
+});

@@ -75,8 +75,8 @@ async function semear() {
     );
 
     const { rows: quizzes } = await cliente.query(
-      `INSERT INTO quizzes (usuario_id, titulo, descricao)
-       VALUES ($1, $2, $3) RETURNING id`,
+      `INSERT INTO quizzes (usuario_id, titulo, descricao, tema)
+       VALUES ($1, $2, $3, $2) RETURNING id`,
       [usuarios[0].id, QUIZ.titulo, QUIZ.descricao]
     );
 

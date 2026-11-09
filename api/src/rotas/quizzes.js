@@ -44,6 +44,7 @@ import {
   validarTitulo,
   validarCategoria,
   validarIcone,
+  validarTema,
   validarPerguntas,
   validarDenuncia,
   MIN_PERGUNTAS
@@ -119,7 +120,7 @@ router.get("/", async (req, res, next) => {
       // `aberturas`. COUNT(*) FILTER faz as duas numa varredura
       // só do índice, em vez de uma subconsulta para cada.
       `SELECT q.id, q.titulo, q.descricao, q.categoria, q.criado_em,
-              q.partidas, q.icone,
+              q.partidas, q.icone, q.tema,
               (CASE WHEN c.quiz_id IS NOT NULL
                          AND (q.situacao = 'publicado' OR q.usuario_id = $1)
                     THEN '/api/quizzes/' || q.id || '/capa?v=' || q.versao END) AS imagem_url,
@@ -183,7 +184,7 @@ router.get("/:id", async (req, res, next) => {
 
     const { rows: quizzes } = await pool.query(
       `SELECT q.id, q.titulo, q.descricao, q.categoria, q.criado_em,
-              q.partidas, q.icone,
+              q.partidas, q.icone, q.tema,
               (CASE WHEN c.quiz_id IS NOT NULL
                          AND (q.situacao = 'publicado' OR q.usuario_id = $2)
                     THEN '/api/quizzes/' || q.id || '/capa?v=' || q.versao END) AS imagem_url,
@@ -312,12 +313,13 @@ router.get("/:id", async (req, res, next) => {
  * existe. Então ou nasce inteiro, ou não nasce.
  */
 router.post("/", exigirLogin, async (req, res, next) => {
-  const { titulo, descricao, categoria, icone, imagem, perguntas } = req.body ?? {};
+  const { titulo, descricao, categoria, icone, imagem, perguntas, tema } = req.body ?? {};
 
   const erro =
     validarTitulo(titulo) ??
     validarCategoria(categoria) ??
     validarIcone(icone) ??
+    validarTema(tema) ??
     validarPerguntas(perguntas);
 
   if (erro) return res.status(400).json({ erro });
@@ -332,10 +334,10 @@ router.post("/", exigirLogin, async (req, res, next) => {
     const { rows } = await cliente.query(
       `INSERT INTO quizzes
          (usuario_id, titulo, descricao, categoria, icone,
-          imagem_url, imagem_credito, imagem_pagina)
-       VALUES ($1, $2, $3, COALESCE($4, 'geral'), $5, $6, $7, $8)
+          imagem_url, imagem_credito, imagem_pagina, tema)
+       VALUES ($1, $2, $3, COALESCE($4, 'geral'), $5, $6, $7, $8, $9)
        RETURNING id, titulo, descricao, categoria, criado_em, partidas, icone, situacao,
-                 imagem_url, imagem_credito, imagem_pagina`,
+                 imagem_url, imagem_credito, imagem_pagina, tema`,
       [
         req.usuarioId,
         titulo.trim(),
@@ -345,7 +347,8 @@ router.post("/", exigirLogin, async (req, res, next) => {
         // A capa é enviada depois, como arquivo, em PUT /:id/capa.
         null,
         null,
-        null
+        null,
+        tema?.trim() || null
       ]
     );
 
@@ -399,12 +402,13 @@ router.patch("/:id", exigirLogin, async (req, res, next) => {
     const id = lerId(req.params.id);
     if (id === null) return res.status(400).json({ erro: "Id inválido" });
 
-    const { titulo, descricao, categoria, icone } = req.body ?? {};
+    const { titulo, descricao, categoria, icone, tema } = req.body ?? {};
 
     const erro =
       (titulo !== undefined ? validarTitulo(titulo) : null) ??
       validarCategoria(categoria) ??
-      validarIcone(icone);
+      validarIcone(icone) ??
+      validarTema(tema);
 
     if (erro) return res.status(400).json({ erro });
 
@@ -415,19 +419,23 @@ router.patch("/:id", exigirLogin, async (req, res, next) => {
           SET titulo    = COALESCE($1, titulo),
               descricao = COALESCE($2, descricao),
               categoria = COALESCE($3, categoria),
-              icone     = COALESCE($4, icone)
+              icone     = COALESCE($4, icone),
+              -- O tema é fixado uma vez e não muda mais: COALESCE
+              -- ao contrário, o valor atual ganha do enviado.
+              tema      = COALESCE(tema, $7)
         -- Publicado não se edita: o que está no catálogo é o que
         -- foi aprovado. Para mudar, duplica-se.
         WHERE id = $5 AND usuario_id = $6 AND situacao <> 'publicado'
         RETURNING id, titulo, descricao, categoria, criado_em, partidas, icone, situacao,
-                  imagem_url, imagem_credito, imagem_pagina`,
+                  imagem_url, imagem_credito, imagem_pagina, tema`,
       [
         titulo?.trim() ?? null,
         descricao?.trim() ?? null,
         categoria ?? null,
         icone || null,
         id,
-        req.usuarioId
+        req.usuarioId,
+        tema?.trim() || null
       ]
     );
 
@@ -580,7 +588,7 @@ router.post("/:id/copia", exigirLogin, async (req, res, next) => {
     // A cópia nasce rascunho, como todo quiz novo: o conteúdo pode
     // ser o mesmo, mas quem vai mexer nele é outra pessoa.
     const { rows: originais } = await cliente.query(
-      `SELECT titulo, descricao, categoria, icone,
+      `SELECT titulo, descricao, categoria, icone, tema,
               imagem_url, imagem_credito, imagem_pagina
          FROM quizzes
         WHERE id = $1 AND (situacao = 'publicado' OR usuario_id = $2)`,
@@ -597,10 +605,10 @@ router.post("/:id/copia", exigirLogin, async (req, res, next) => {
     const { rows: criados } = await cliente.query(
       `INSERT INTO quizzes
          (usuario_id, titulo, descricao, categoria, icone,
-          imagem_url, imagem_credito, imagem_pagina)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          imagem_url, imagem_credito, imagem_pagina, tema)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING id, titulo, descricao, categoria, criado_em, partidas, icone, situacao,
-                 imagem_url, imagem_credito, imagem_pagina`,
+                 imagem_url, imagem_credito, imagem_pagina, tema`,
       [
         req.usuarioId,
         `${original.titulo} (cópia)`.slice(0, 140),
@@ -609,7 +617,8 @@ router.post("/:id/copia", exigirLogin, async (req, res, next) => {
         original.icone,
         null,
         original.imagem_credito,
-        original.imagem_pagina
+        original.imagem_pagina,
+        original.tema
       ]
     );
 

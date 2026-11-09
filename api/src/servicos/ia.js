@@ -40,7 +40,7 @@ export const DIFICULDADES = ["facil", "medio", "dificil"];
  * porque são os vícios que aparecem sem elas — modelo treinado em
  * provas escolares adora pegadinha preguiçosa.
  */
-function montarPedido({ tema, quantidade, dificuldade }) {
+function montarPedido({ tema, quantidade, dificuldade, evitar = [] }) {
   const niveis = {
     facil: "fácil: alguém com contato casual com o tema acerta",
     medio: "médio: exige conhecer o tema, mas não ser especialista",
@@ -58,8 +58,21 @@ Regras:
 - não repita o mesmo assunto entre perguntas
 - enunciado curto e direto, no máximo 2 linhas
 - se você não tiver certeza de um fato, escolha outro aspecto do tema
-
+${blocoEvitar(evitar)}
 Responda apenas com o JSON pedido, sem texto em volta.`;
+}
+
+/**
+ * As perguntas que o quiz já tem. Sem isto, gerar de novo sobre o
+ * mesmo tema traz as mesmas perguntas (o modelo tende às mais
+ * óbvias), o editor descarta as repetidas e nada novo entra.
+ */
+function blocoEvitar(evitar) {
+  if (evitar.length === 0) return "";
+  return `
+O quiz já tem as perguntas abaixo. Não repita nenhuma, nem pergunte a mesma coisa com outras palavras — explore outros aspectos do tema:
+${evitar.map((e) => `- ${e}`).join("\n")}
+`;
 }
 
 // O formato que queremos de volta. O Gemini aceita um esquema e
@@ -99,9 +112,17 @@ const ESQUEMA_GEMINI = {
  * tela sem querer, é evidente que o provedor está errado — bem
  * melhor do que um texto plausível que esconde o engano.
  */
-async function comFalso({ tema, quantidade }) {
-  return Array.from({ length: quantidade }, (_, i) => ({
-    enunciado: `[exemplo ${i + 1}] Pergunta sobre ${tema}?`,
+async function comFalso({ tema, quantidade, evitar = [] }) {
+  // Como o modelo de verdade deve fazer: pula o que o quiz já tem.
+  const jaTem = new Set(evitar.map(normalizarTexto));
+  const enunciados = [];
+  for (let i = 1; enunciados.length < quantidade; i++) {
+    const enunciado = `[exemplo ${i}] Pergunta sobre ${tema}?`;
+    if (!jaTem.has(normalizarTexto(enunciado))) enunciados.push(enunciado);
+  }
+
+  return enunciados.map((enunciado) => ({
+    enunciado,
     segundos: SEGUNDOS_PADRAO,
     alternativas: [
       { texto: "Resposta certa de exemplo", correta: true },
@@ -381,7 +402,7 @@ export async function sugerirCapa(tema) {
   }
 }
 
-export async function gerarPerguntas({ tema, quantidade = 10, dificuldade = "medio" }) {
+export async function gerarPerguntas({ tema, quantidade = 10, dificuldade = "medio", evitar = [] }) {
   const provedor = process.env.IA_PROVEDOR || "falso";
   const implementacao = IMPLEMENTACOES[provedor];
 
@@ -392,7 +413,7 @@ export async function gerarPerguntas({ tema, quantidade = 10, dificuldade = "med
   let brutas;
 
   try {
-    brutas = await implementacao({ tema, quantidade, dificuldade });
+    brutas = await implementacao({ tema, quantidade, dificuldade, evitar });
   } catch (erro) {
     erro = traduzirErroDeRede(erro);
     if (erro instanceof ErroIA) throw erro;

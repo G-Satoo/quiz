@@ -157,6 +157,28 @@ describe("cache da geração", () => {
     assert.equal(outro.dados.doCache, false);
   });
 
+  it("gerar de novo para um quiz que já tem perguntas traz perguntas novas", async () => {
+    // O bug: com o cache, a segunda geração no mesmo nível devolvia
+    // as mesmas perguntas, o editor descartava todas como repetidas
+    // e nada entrava.
+    const pedido = { tema: "Naruto", quantidade: 3, dificuldade: "dificil" };
+    const primeira = await cliente.post("/api/geracao/perguntas", pedido);
+    const jaTem = primeira.dados.perguntas.map((p) => p.enunciado);
+
+    const segunda = await cliente.post("/api/geracao/perguntas", { ...pedido, evitar: jaTem });
+
+    assert.equal(segunda.dados.doCache, false);
+    assert.equal(segunda.dados.perguntas.length, 3);
+    for (const p of segunda.dados.perguntas) {
+      assert.ok(!jaTem.includes(p.enunciado), `repetiu: ${p.enunciado}`);
+    }
+
+    // E o resultado com "evitar" não substitui o cache do quiz vazio.
+    const doZero = await cliente.post("/api/geracao/perguntas", pedido);
+    assert.equal(doZero.dados.doCache, true);
+    assert.deepEqual(doZero.dados.perguntas, primeira.dados.perguntas);
+  });
+
   it("guarda o resultado com prazo de validade", async () => {
     // Sem prazo, cada tema já pedido ocuparia memória para sempre.
     await cliente.post("/api/geracao/perguntas", { tema: "Naruto", quantidade: 2 });

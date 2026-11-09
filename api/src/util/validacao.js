@@ -115,6 +115,14 @@ export function validarCategoria(categoria) {
  * amanhã. Basta ser curto — o pior caso é uma capa com uma letra
  * estranha, não um dado perigoso (a tela usa textContent).
  */
+/** O tema do gerador. Opcional: quiz escrito à mão não tem. */
+export function validarTema(tema) {
+  if (tema === undefined || tema === null || tema === "") return null;
+  if (typeof tema !== "string" || tema.trim().length < 2) return "Escreva o tema do quiz";
+  if (tema.trim().length > 200) return "O tema é longo demais";
+  return null;
+}
+
 export function validarIcone(icone) {
   if (icone === undefined || icone === null || icone === "") return null;
   if (typeof icone !== "string") return "Símbolo inválido";
