@@ -77,4 +77,18 @@ jobs:
         env:
           DATABASE_URL_TESTE: postgres://quiz:quiz123@localhost:5438/quiz_teste
           REDIS_URL_TESTE: redis://localhost:6383
-        run: npm run test:integracao
+        # tee guarda a saída para o passo seguinte; o bash do Actions
+        # roda com pipefail, então a falha do teste continua falhando.
+        run: npm run test:integracao 2>&1 | tee saida-integracao.txt
+
+      # Se algo falhou, o nome de cada teste que quebrou vira uma
+      # anotação do job: aparece no resumo da execução, sem precisar
+      # abrir o log inteiro.
+      - name: Apontar os testes que falharam
+        if: failure()
+        working-directory: api
+        run: |
+          grep -E "^\s*(not ok|✖)" saida-integracao.txt | head -10 | while read -r linha; do
+            echo "::error title=Teste falhou::$linha"
+          done
+          grep -E -A8 "^\s*(not ok|✖)" saida-integracao.txt | head -120 || true

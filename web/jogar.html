@@ -302,6 +302,10 @@ function mostrarPergunta(mensagem) {
 
   const lista = $("alternativas");
   lista.innerHTML = "";
+  // Pergunta nova, lista destravada. Sem isto a trava da pergunta
+  // anterior (por ter respondido, ou pelo tempo) valia para sempre,
+  // e só a primeira pergunta da partida aceitava resposta.
+  lista.classList.remove("travada");
 
   for (const [posicao, alternativa] of mensagem.alternativas.entries()) {
     const item = document.createElement("li");
@@ -316,11 +320,22 @@ function mostrarPergunta(mensagem) {
 
     item.append(letra, texto);
 
-    item.addEventListener("click", () => {
+    // Clicável também pelo teclado: Tab chega, Enter ou espaço responde.
+    item.tabIndex = 0;
+    item.setAttribute("role", "button");
+
+    const responder = () => {
       if (lista.classList.contains("travada")) return;
 
       item.classList.add("escolhida");
       conexao.enviar({ tipo: "responder", alternativaId: alternativa.id });
+    };
+
+    item.addEventListener("click", responder);
+    item.addEventListener("keydown", (evento) => {
+      if (evento.key !== "Enter" && evento.key !== " ") return;
+      evento.preventDefault();
+      responder();
     });
 
     lista.append(item);
