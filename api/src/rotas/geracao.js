@@ -134,8 +134,9 @@ router.post(
           const perguntas = Array.isArray(antigo) ? antigo : antigo.perguntas;
           const icone = Array.isArray(antigo) ? null : antigo.icone;
           const imagem = Array.isArray(antigo) ? null : (antigo.imagem ?? null);
+          const categoria = Array.isArray(antigo) ? null : (antigo.categoria ?? null);
 
-          return res.json({ perguntas, icone, imagem, doCache: true });
+          return res.json({ perguntas, icone, imagem, categoria, doCache: true });
         }
       } catch {
         // Redis fora do ar não impede gerar — só deixa mais caro.
@@ -154,16 +155,18 @@ router.post(
       // com o emoji, que é a resposta honesta.
       const imagem = capa.busca ? await buscarImagem(capa.busca) : null;
       const icone = capa.icone;
+      // Sugestão para o rascunho; a definitiva vem na aprovação.
+      const categoria = capa.categoria;
 
       try {
         if (evitar.length === 0) {
-          await redis.set(chave, JSON.stringify({ perguntas, icone, imagem }), "EX", VALIDADE_CACHE);
+          await redis.set(chave, JSON.stringify({ perguntas, icone, imagem, categoria }), "EX", VALIDADE_CACHE);
         }
       } catch {
         // idem: não conseguir cachear não invalida o resultado.
       }
 
-      res.json({ perguntas, icone, imagem, doCache: false });
+      res.json({ perguntas, icone, imagem, categoria, doCache: false });
     } catch (erro) {
       if (erro instanceof ErroIA) {
         // O detalhe técnico fica no log do servidor; para a tela

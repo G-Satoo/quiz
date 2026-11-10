@@ -418,7 +418,10 @@ router.patch("/:id", exigirLogin, async (req, res, next) => {
       `UPDATE quizzes
           SET titulo    = COALESCE($1, titulo),
               descricao = COALESCE($2, descricao),
-              categoria = COALESCE($3, categoria),
+              -- Rascunho guarda a sugestão do gerador; depois da
+              -- análise, a categoria é a que a IA definiu.
+              categoria = CASE WHEN situacao IN ('rascunho', 'recusado')
+                               THEN COALESCE($3, categoria) ELSE categoria END,
               icone     = COALESCE($4, icone),
               -- O tema é fixado uma vez e não muda mais: COALESCE
               -- ao contrário, o valor atual ganha do enviado.

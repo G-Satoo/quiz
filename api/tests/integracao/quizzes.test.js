@@ -1558,3 +1558,31 @@ describe("tema do quiz", () => {
     assert.equal(dados.quiz.tema, "Naruto");
   });
 });
+
+describe("categoria automática", () => {
+  it("a aprovação define a categoria pelo conteúdo, não pela escolha do autor", async () => {
+    const { dados } = await cliente.post("/api/quizzes", {
+      titulo: "Ninjas",
+      categoria: "esportes",
+      perguntas: completar([pergunta("[assunto:anime] Quem é o sétimo Hokage?")])
+    });
+
+    await publicar(dados.quiz);
+
+    const { dados: lido } = await cliente.get(`/api/quizzes/${dados.quiz.id}`);
+    assert.equal(lido.quiz.categoria, "anime");
+  });
+
+  it("sem assunto claro, vai para Geral", async () => {
+    const { dados } = await cliente.post("/api/quizzes", {
+      titulo: "Variados",
+      categoria: "games",
+      perguntas: completar([pergunta()])
+    });
+
+    await publicar(dados.quiz);
+
+    const { dados: lido } = await cliente.get(`/api/quizzes/${dados.quiz.id}`);
+    assert.equal(lido.quiz.categoria, "geral");
+  });
+});

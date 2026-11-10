@@ -99,9 +99,11 @@ export async function analisarComIA(quiz) {
         SET situacao = $1,
             moderacao_motivo = $2,
             moderacao_por = 'ia',
-            moderacao_em = now()
+            moderacao_em = now(),
+            -- A categoria é a que a IA viu no conteúdo.
+            categoria = $5
       WHERE id = $3 AND versao = $4`,
-    [situacao, veredito.motivo, quiz.id, quiz.versao]
+    [situacao, veredito.motivo, quiz.id, quiz.versao, veredito.assunto]
   );
 
   if (rowCount === 0) return { mudou: true };

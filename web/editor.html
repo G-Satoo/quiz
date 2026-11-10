@@ -130,19 +130,13 @@
         </div>
 
         <div>
-          <label for="categoria">Categoria</label>
-          <select id="categoria">
-            <option value="geral">Geral</option>
-            <option value="anime">Anime</option>
-            <option value="games">Games</option>
-            <option value="filmes">Filmes</option>
-            <option value="musica">Música</option>
-            <option value="esportes">Esportes</option>
-            <option value="historia">História</option>
-            <option value="ciencia">Ciência</option>
-            <option value="tecnologia">Tecnologia</option>
-            <option value="educacao">Educação</option>
-          </select>
+          <!-- Não é escolha do autor: a IA define pelo conteúdo (uma
+               sugestão ao gerar, a definitiva na aprovação). Assim
+               ninguém põe um quiz de futebol em "Anime". -->
+          <label>Categoria</label>
+          <div class="categoria-automatica" id="rotulo-categoria"
+               title="Definida pela IA a partir das perguntas, na aprovação">Geral</div>
+          <input type="hidden" id="categoria" value="geral">
         </div>
       </div>
     </div>
@@ -343,6 +337,17 @@ let travado = false;
 // apresentar, não para editar. Quem quiser mudar duplica.
 let somenteLeitura = false;
 let autor = null;
+
+const NOMES_CATEGORIA = {
+  geral: "Geral", anime: "Anime", games: "Games", filmes: "Filmes",
+  musica: "Música", esportes: "Esportes", historia: "História",
+  ciencia: "Ciência", tecnologia: "Tecnologia", educacao: "Educação"
+};
+
+function mostrarCategoria(categoria) {
+  $("categoria").value = categoria;
+  $("rotulo-categoria").textContent = NOMES_CATEGORIA[categoria] ?? categoria;
+}
 
 // O tema do quiz: definido na primeira geração e fixo dali em diante
 // (migração 018). Nulo enquanto o quiz nunca usou o gerador.
@@ -644,7 +649,7 @@ if (quizId) {
 
     $("titulo").value = quiz.titulo;
     $("descricao").value = quiz.descricao ?? "";
-    $("categoria").value = quiz.categoria ?? "geral";
+    mostrarCategoria(quiz.categoria ?? "geral");
     mostrarPrevia(quiz.imagem_url ?? null);
     if (quiz.imagem_credito) $("credito-capa").textContent = `Imagem: ${quiz.imagem_credito}`;
 
@@ -1060,7 +1065,7 @@ $("botao-gerar").addEventListener("click", async () => {
   botao.textContent = "Gerando…";
 
   try {
-    const { perguntas: geradas, imagem, doCache } = await pedir("POST", "/api/geracao/perguntas", {
+    const { perguntas: geradas, imagem, categoria, doCache } = await pedir("POST", "/api/geracao/perguntas", {
       tema,
       quantidade: Number($("quantidade").value) || 10,
       dificuldade: $("dificuldade").value,
@@ -1097,6 +1102,12 @@ $("botao-gerar").addEventListener("click", async () => {
 
     // A primeira geração define o tema do quiz.
     if (!temaFixo) travarTema(tema);
+
+    // A sugestão de categoria vale para o rascunho; a aprovação
+    // decide a definitiva.
+    if (categoria && (!situacao || situacao === "rascunho" || situacao === "recusado")) {
+      mostrarCategoria(categoria);
+    }
 
     perguntas = soTemVazia ? novas : [...perguntas, ...novas];
 

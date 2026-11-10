@@ -2202,3 +2202,12 @@ button.botao-acao.discreto { border: 1px solid var(--borda); }
 /* Tema fixo do quiz: dá para ler, não para trocar. */
 #tema[readonly] { opacity: 0.7; cursor: not-allowed; }
 #dica-tema { margin: 8px 0 0; }
+
+/* Categoria definida pela IA: mostra, não deixa escolher. */
+.categoria-automatica {
+  padding: 10px 12px;
+  border: 1px dashed var(--borda);
+  border-radius: 8px;
+  color: var(--texto-fraco);
+  white-space: nowrap;
+}
