@@ -57,6 +57,27 @@
     </form>
   </dialog>
 
+  <!-- Apagar a conta: irreversível, então pede a senha de novo. -->
+  <dialog id="janela-apagar-conta" class="janela">
+    <form id="formulario-apagar-conta" method="dialog">
+      <div class="cabeca-janela">
+        <h2>Apagar minha conta</h2>
+        <button type="button" class="discreto icone" id="fechar-apagar-conta" aria-label="Fechar">✕</button>
+      </div>
+      <p class="dica-campo">
+        Isto não tem volta. Somem o seu perfil, a foto, a imagem de fundo e os
+        seus rascunhos. Os quizzes que já estão no catálogo continuam no site,
+        sem o seu nome, e as partidas que você jogou ficam anônimas.
+      </p>
+
+      <label for="senha-apagar">Digite a sua senha para confirmar</label>
+      <input id="senha-apagar" type="password" autocomplete="current-password" required>
+
+      <div id="erro-apagar-conta" class="erro escondido"></div>
+      <button type="submit" class="largo perigo" id="botao-apagar-conta">Apagar minha conta para sempre</button>
+    </form>
+  </dialog>
+
   <div class="conteudo">
     <div id="erro" class="erro escondido"></div>
 
@@ -110,6 +131,12 @@
       <div class="catalogo meus-quizzes" id="meus"></div>
       <div id="meus-vazio" class="vazio escondido">Você ainda não criou nenhum quiz.</div>
 
+      <!-- Só no seu perfil: as últimas partidas jogadas logado. -->
+      <div id="secao-partidas" class="escondido">
+        <div class="topo-secao-perfil"><h2>Minhas partidas</h2></div>
+        <ul class="lista-partidas" id="partidas"></ul>
+      </div>
+
       <!-- Sair mora aqui, e não no topo: é algo que se faz raramente. -->
       <!-- Só aparece para administradores. -->
       <p id="link-moderacao" class="escondido" style="margin-top:22px">
@@ -118,6 +145,7 @@
 
       <div class="rodape-perfil" id="rodape-perfil">
         <button class="discreto" id="sair">Sair da conta</button>
+        <button class="discreto botao-apagar-conta" id="abrir-apagar-conta">Apagar minha conta</button>
       </div>
     </section>
   </div>
@@ -514,6 +542,10 @@ else try {
   for (const quiz of quizzes) lista.append(desenharMeu(quiz));
 
   $("perfil").classList.remove("escondido");
+
+  // Depois de a página aparecer: o histórico é um extra, e não deve
+  // segurar o resto se demorar ou falhar.
+  carregarPartidas();
 } catch (erro) {
   if (erro.message !== "sem sessão") {
     $("erro").textContent = erro.message;
@@ -625,6 +657,93 @@ function desenharMeu(quiz, { publico = false } = {}) {
   cartao.append(capa, titulo, meta, acoes);
   return cartao;
 }
+
+// ----- Minhas partidas -----
+
+async function carregarPartidas() {
+  try {
+    const { partidas } = await pedir("GET", "/api/usuarios/eu/partidas");
+    if (partidas.length === 0) return;
+
+    const lista = $("partidas");
+
+    for (const partida of partidas) {
+      const item = document.createElement("li");
+
+      const posicao = document.createElement("span");
+      posicao.className = "posicao-partida" + (partida.posicao === 1 ? " venceu" : "");
+      posicao.textContent = `${partida.posicao}º`;
+      posicao.title = `${partida.posicao}º de ${partida.jogadores}`;
+
+      const meio = document.createElement("div");
+      meio.className = "meio-partida";
+
+      // Quiz que saiu do catálogo não tem página pública: só o nome.
+      const quiz = document.createElement(partida.no_catalogo ? "a" : "span");
+      quiz.className = "quiz-partida";
+      quiz.textContent = partida.quiz; // texto, nunca innerHTML
+      if (partida.no_catalogo) quiz.href = `editor.html?id=${partida.quiz_id}`;
+
+      const detalhe = document.createElement("span");
+      detalhe.className = "detalhe-partida";
+      detalhe.textContent =
+        new Date(partida.terminado_em).toLocaleDateString("pt-BR", { day: "numeric", month: "short" }) +
+        ` · ${partida.jogadores} jogador${partida.jogadores === 1 ? "" : "es"}` +
+        (partida.valeu ? "" : " · não contou no ranking");
+      if (!partida.valeu) {
+        detalhe.title = "Conta no ranking só a primeira partida do dia em cada quiz do catálogo, e nunca no seu próprio quiz.";
+      }
+
+      meio.append(quiz, detalhe);
+
+      const pontos = document.createElement("strong");
+      pontos.className = "pontos-partida";
+      pontos.textContent = numero(partida.pontos);
+
+      item.append(posicao, meio, pontos);
+      lista.append(item);
+    }
+
+    $("secao-partidas").classList.remove("escondido");
+  } catch {
+    // Sem histórico, o perfil continua inteiro.
+  }
+}
+
+// ----- Apagar a conta -----
+
+$("abrir-apagar-conta").addEventListener("click", () => {
+  $("senha-apagar").value = "";
+  $("erro-apagar-conta").classList.add("escondido");
+  $("janela-apagar-conta").showModal();
+});
+
+$("fechar-apagar-conta").addEventListener("click", () => $("janela-apagar-conta").close());
+
+$("formulario-apagar-conta").addEventListener("submit", async (evento) => {
+  evento.preventDefault();
+  const botao = $("botao-apagar-conta");
+  botao.disabled = true;
+
+  try {
+    const resposta = await fetch("/api/usuarios/eu", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ senha: $("senha-apagar").value })
+    });
+
+    if (!resposta.ok) {
+      const dados = await resposta.json().catch(() => null);
+      throw new Error(dados?.erro ?? "Não consegui apagar a conta");
+    }
+
+    location.href = "index.html";
+  } catch (erro) {
+    $("erro-apagar-conta").textContent = erro.message;
+    $("erro-apagar-conta").classList.remove("escondido");
+    botao.disabled = false;
+  }
+});
 
 $("sair").addEventListener("click", async () => {
   $("sair").disabled = true;

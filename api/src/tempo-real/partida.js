@@ -29,7 +29,7 @@
 
 import { pool } from "../../db/pool.js";
 import * as salas from "./salas.js";
-import { pontosDoAcerto } from "./pontuacao.js";
+import { bonusDaSequencia, pontosDoAcerto } from "./pontuacao.js";
 
 // Folga para a viagem da resposta pela rede. Sem ela, quem
 // responde no último segundo é punido pela latência, não pelo
@@ -242,21 +242,37 @@ export async function fecharPergunta(codigo) {
 
   const porJogador = new Map();
 
+  // Acertos seguidos. Só quem acertou AGORA continua com sequência:
+  // quem errou ou não respondeu fica de fora do objeto novo, e zera.
+  const sequenciasAntes = await salas.lerSequencias(codigo);
+  const sequencias = {};
+
   for (const resposta of respostas) {
     const acertou = resposta.alternativaId === correta.id;
     let ganhos = 0;
+    let bonus = 0;
+    let sequencia = 0;
 
     if (acertou) {
-      ganhos = pontosDoAcerto(pergunta.segundos, resposta.decorridoMs);
+      sequencia = (sequenciasAntes[resposta.jogadorId] ?? 0) + 1;
+      sequencias[resposta.jogadorId] = sequencia;
+
+      const base = pontosDoAcerto(pergunta.segundos, resposta.decorridoMs);
+      bonus = bonusDaSequencia(base, sequencia);
+      ganhos = base + bonus;
       await salas.somarPontos(codigo, resposta.jogadorId, ganhos);
     }
 
     porJogador.set(resposta.jogadorId, {
       acertou,
       ganhos,
+      bonus,
+      sequencia,
       alternativaId: resposta.alternativaId
     });
   }
+
+  await salas.gravarSequencias(codigo, sequencias);
 
   await salas.mudarFase(codigo, "resultado");
 
@@ -325,12 +341,28 @@ export async function gravarResultados(codigo, quizId, placar, contas = {}) {
     // vale_ranking é decidido AGORA, pela situação do quiz no fim
     // da partida. Jogar o próprio rascunho sabendo as respostas e
     // só depois publicá-lo não transforma aquelas partidas em pontos.
+    //
+    // E para quem tem conta, mais duas travas contra inflar o ranking:
+    //   - o autor não pontua no próprio quiz (ele sabe o gabarito);
+    //   - só a PRIMEIRA partida do dia em cada quiz vale. Repetir o
+    //     mesmo quiz já decorado dez vezes renderia dez vezes os
+    //     pontos sem mérito nenhum.
+    // A partida acontece do mesmo jeito; só não soma no ranking.
     `INSERT INTO resultados
        (quiz_id, sala, jogador_id, apelido, pontos, posicao, usuario_id, vale_ranking)
      SELECT $1, $2, x.id, x.apelido, x.pontos, x.posicao, x.usuario_id,
-            COALESCE((SELECT situacao = 'publicado' FROM quizzes WHERE id = $1), FALSE)
+            COALESCE(q.situacao = 'publicado', FALSE)
+              AND (x.usuario_id IS NULL
+                   OR (x.usuario_id IS DISTINCT FROM q.usuario_id
+                       AND NOT EXISTS (
+                         SELECT 1 FROM resultados r
+                          WHERE r.usuario_id = x.usuario_id
+                            AND r.quiz_id = $1
+                            AND r.vale_ranking
+                            AND r.terminado_em >= inicio_do_dia())))
        FROM jsonb_to_recordset($3::jsonb)
          AS x(id text, apelido text, pontos int, posicao int, usuario_id int)
+       LEFT JOIN quizzes q ON q.id = $1
      ON CONFLICT (sala, jogador_id) DO NOTHING`,
     [quizId, codigo, JSON.stringify(linhas)]
   );

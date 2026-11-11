@@ -41,3 +41,17 @@ describe("pontosDoAcerto", () => {
     assert.equal(pontosDoAcerto(20, 25_000), pontosDoAcerto(20, 20_000));
   });
 });
+
+describe("bônus da sequência de acertos", () => {
+  it("o primeiro acerto não tem bônus; cada seguido soma 10%, até 50%", async () => {
+    const { bonusDaSequencia } = await import("../src/tempo-real/pontuacao.js");
+
+    assert.equal(bonusDaSequencia(1000, 0), 0);
+    assert.equal(bonusDaSequencia(1000, 1), 0);
+    assert.equal(bonusDaSequencia(1000, 2), 100);
+    assert.equal(bonusDaSequencia(1000, 3), 200);
+    assert.equal(bonusDaSequencia(1000, 6), 500);
+    assert.equal(bonusDaSequencia(1000, 20), 500);
+    assert.equal(bonusDaSequencia(707, 2), 71);
+  });
+});

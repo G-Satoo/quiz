@@ -174,6 +174,9 @@
           <span id="pergunta-modo">Não tem conta?</span>
           <a href="#" id="trocar-modo">Criar conta</a>
         </p>
+        <p class="troca-modo" style="margin-top:6px">
+          <a href="redefinir.html">Esqueci a senha</a>
+        </p>
       </div>
 
       <p style="text-align:center;margin-top:18px">
@@ -203,6 +206,11 @@
         </div>
       </div>
 
+      <!-- Busca por título, tema, descrição ou autor. Filtra o que já
+           está na página: o catálogo vem inteiro numa requisição. -->
+      <input type="search" id="busca" class="busca-catalogo" maxlength="80"
+             placeholder="Buscar quiz por título, tema ou autor" aria-label="Buscar quiz">
+
       <div class="filtros" id="filtros"></div>
       <div class="catalogo" id="catalogo"></div>
       <div id="catalogo-vazio" class="vazio escondido"></div>
@@ -216,6 +224,11 @@
         <div class="instrucao" style="margin:4px 0 18px"><strong id="endereco"></strong></div>
         <div style="color:var(--texto-fraco);font-size:14px">com o código</div>
         <div class="codigo-grande" id="codigo"></div>
+
+        <!-- Ou aponta a câmera: o QR leva direto à sala, com o
+             código já preenchido. -->
+        <div class="qr-sala" id="qr-sala" aria-label="QR code para entrar na sala"></div>
+        <div class="legenda-qr">ou aponte a câmera do celular</div>
       </div>
 
       <div style="display:flex;align-items:center;gap:16px;margin:24px 0 10px">
@@ -265,6 +278,7 @@
     <!-- 6. Fim -->
     <section id="tela-fim" class="escondido">
       <h1>Fim da partida</h1>
+      <div class="podio" id="podio"></div>
       <p class="subtitulo">Placar final.</p>
       <ol class="placar" id="placar-final"></ol>
       <button class="discreto" style="margin-top:24px" onclick="location.reload()">
@@ -272,6 +286,10 @@
       </button>
     </section>
   </div>
+
+<!-- Gerador de QR code (qrcode-generator, MIT), copiado para o
+     projeto: o telão não pode depender de um site de fora no ar. -->
+<script src="vendor/qrcode.js"></script>
 
 <script type="module">
 // ============================================================
@@ -289,6 +307,7 @@
 import { criarConexao, pintarEstado } from "./conexao.js";
 import { artePorCategoria, coresDaCategoria } from "./capas.js";
 import { fundoDoPerfil, montarAvatar } from "./avatar.js";
+import { montarPodio } from "./podio.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -1275,53 +1294,112 @@ function desenharFileira(fileira) {
   return secao;
 }
 
-// ---------- Jogadores do dia ----------
+// ---------- Ranking ----------
 //
-// Quem mais somou pontos desde a meia-noite — SÓ ENTRE QUEM TEM
-// CONTA. Sem conta, o jogador é um apelido digitado na hora, e
-// somar todos os "Ana" do dia juntaria pessoas diferentes. Com
-// conta, somar é honesto: é a mesma pessoa em várias partidas.
+// Quem mais somou pontos hoje, na semana ou desde sempre — SÓ ENTRE
+// QUEM TEM CONTA. Sem conta, o jogador é um apelido digitado na
+// hora, e somar todos os "Ana" do dia juntaria pessoas diferentes.
+// Com conta, somar é honesto: é a mesma pessoa em várias partidas.
+//
+// O dia e a semana viram à meia-noite de Brasília (a semana, na
+// segunda): quem decide é o servidor.
+
+const PERIODOS = [
+  ["hoje", "Hoje", "quem mais somou pontos hoje"],
+  ["semana", "Semana", "quem mais somou pontos desde segunda"],
+  ["sempre", "Sempre", "quem mais somou pontos desde o começo"]
+];
+
+let periodoAtual = "hoje";
+const rankings = new Map(); // período -> jogadores, para não pedir de novo
+
+async function lerRanking(periodo) {
+  if (!rankings.has(periodo)) {
+    const { jogadores } = await pedir("GET", `/api/ranking/${periodo}`);
+    rankings.set(periodo, jogadores);
+  }
+  return rankings.get(periodo);
+}
 
 async function carregarJogadoresDoDia() {
   const caixa = $("jogadores-dia");
+  rankings.clear();
 
   try {
-    const { jogadores } = await pedir("GET", "/api/ranking/hoje");
-    caixa.innerHTML = "";
-
-    // Mesma regra das fileiras: sem dado, a seção não aparece.
-    if (jogadores.length === 0) return;
-
-    const secao = document.createElement("section");
-    secao.className = "fileira";
-
-    const cabecalho = document.createElement("div");
-    cabecalho.className = "cabecalho-fileira";
-
-    const h2 = document.createElement("h2");
-    h2.className = "titulo-secao-catalogo";
-    h2.textContent = "Jogadores do dia";
-
-    const legenda = document.createElement("span");
-    legenda.className = "nota-fileira";
-    legenda.textContent = "quem mais somou pontos hoje · só quem joga com conta";
-
-    cabecalho.append(h2, legenda);
-
-    const trilho = document.createElement("div");
-    trilho.className = "trilho trilho-jogadores";
-
-    for (const [i, jogador] of jogadores.entries()) {
-      trilho.append(desenharJogador(jogador, i + 1));
+    // Se ninguém nunca pontuou, a seção nem aparece — mesma regra
+    // das fileiras: sem dado, não há o que mostrar.
+    if ((await lerRanking("sempre")).length === 0) {
+      caixa.innerHTML = "";
+      return;
     }
 
-    secao.append(cabecalho, trilho);
-    caixa.append(secao);
+    await desenharRanking();
   } catch {
     // Ranking fora do ar não é motivo para avisar quem só veio
     // ver o catálogo: a seção some, o resto segue.
     caixa.innerHTML = "";
   }
+}
+
+async function desenharRanking() {
+  const caixa = $("jogadores-dia");
+  const jogadores = await lerRanking(periodoAtual);
+  const [, , explicacao] = PERIODOS.find(([valor]) => valor === periodoAtual);
+
+  const secao = document.createElement("section");
+  secao.className = "fileira";
+
+  const cabecalho = document.createElement("div");
+  cabecalho.className = "cabecalho-fileira";
+
+  const h2 = document.createElement("h2");
+  h2.className = "titulo-secao-catalogo";
+  h2.textContent = "Ranking";
+
+  const abas = document.createElement("div");
+  abas.className = "abas-ranking";
+  abas.setAttribute("role", "tablist");
+
+  for (const [valor, rotulo] of PERIODOS) {
+    const aba = document.createElement("button");
+    aba.type = "button";
+    aba.className = "filtro" + (valor === periodoAtual ? " ativo" : "");
+    aba.textContent = rotulo;
+    aba.setAttribute("role", "tab");
+    aba.setAttribute("aria-selected", String(valor === periodoAtual));
+    aba.addEventListener("click", async () => {
+      periodoAtual = valor;
+      try {
+        await desenharRanking();
+      } catch {
+        caixa.innerHTML = "";
+      }
+    });
+    abas.append(aba);
+  }
+
+  const legenda = document.createElement("span");
+  legenda.className = "nota-fileira";
+  legenda.textContent = `${explicacao} · só quem joga com conta`;
+
+  cabecalho.append(h2, abas, legenda);
+  secao.append(cabecalho);
+
+  if (jogadores.length === 0) {
+    const vazio = document.createElement("p");
+    vazio.className = "ranking-vazio";
+    vazio.textContent = periodoAtual === "hoje"
+      ? "Ninguém pontuou hoje ainda. Jogue um quiz do catálogo logado e apareça aqui."
+      : "Ninguém pontuou nesta semana ainda.";
+    secao.append(vazio);
+  } else {
+    const trilho = document.createElement("div");
+    trilho.className = "trilho trilho-jogadores";
+    for (const [i, jogador] of jogadores.entries()) trilho.append(desenharJogador(jogador, i + 1));
+    secao.append(trilho);
+  }
+
+  caixa.replaceChildren(secao);
 }
 
 const MEDALHAS = { 1: "ouro", 2: "prata", 3: "bronze" };
@@ -1355,6 +1433,15 @@ function desenharJogador(jogador, posicao) {
   return cartao;
 }
 
+// ---------- Busca ----------
+
+/** Minúsculas e sem acento: "historia" acha "História". */
+function semAcento(texto) {
+  return texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+}
+
+$("busca").addEventListener("input", desenharCatalogo);
+
 // ---------- Filtros e grade ----------
 function desenharFiltros() {
   const filtros = $("filtros");
@@ -1383,17 +1470,31 @@ function desenharCatalogo() {
   const catalogo = $("catalogo");
   catalogo.innerHTML = "";
 
-  const lista = filtroAtual
-    ? todosOsQuizzes.filter((q) => q.categoria === filtroAtual)
-    : todosOsQuizzes;
+  const termos = semAcento($("busca").value).split(" ").filter(Boolean);
+
+  const lista = todosOsQuizzes.filter((q) => {
+    if (filtroAtual && q.categoria !== filtroAtual) return false;
+    if (termos.length === 0) return true;
+
+    // Todas as palavras digitadas têm que aparecer em algum lugar:
+    // "naruto classic" acha o quiz mesmo com as palavras separadas.
+    const onde = semAcento(
+      [q.titulo, q.tema, q.descricao, q.autor, CATEGORIAS[q.categoria]].filter(Boolean).join(" ")
+    );
+    return termos.every((termo) => onde.includes(termo));
+  });
 
   const vazio = $("catalogo-vazio");
   vazio.classList.toggle("escondido", lista.length > 0);
 
   if (lista.length === 0) {
-    vazio.innerHTML = todosOsQuizzes.length === 0
-      ? 'Nenhum quiz ainda. Clique em <strong>+ Novo quiz</strong> para criar o primeiro.'
-      : "Nenhum quiz nesta categoria.";
+    if (todosOsQuizzes.length === 0) {
+      vazio.innerHTML = 'Nenhum quiz ainda. Clique em <strong>+ Novo quiz</strong> para criar o primeiro.';
+    } else {
+      vazio.textContent = termos.length > 0
+        ? "Nenhum quiz encontrado para essa busca."
+        : "Nenhum quiz nesta categoria.";
+    }
     return;
   }
 
@@ -1539,6 +1640,7 @@ async function abrirSala(quizId, botao, configuracao = {}) {
     // aparecer no telão — senão o celular tenta "localhost" e
     // chega no próprio aparelho.
     $("endereco").textContent = location.host;
+    desenharQr(sala.codigo);
 
     mostrar("espera");
     abrirConexao();
@@ -1710,7 +1812,32 @@ function desenharPlacar(elemento, placar) {
 function mostrarFim(mensagem) {
   pararCronometro();
   mostrar("fim");
+  montarPodio($("podio"), mensagem.placar);
   desenharPlacar($("placar-final"), mensagem.placar);
+}
+
+/**
+ * O QR da sala: o endereço de jogar.html já com o código. Quem
+ * aponta a câmera cai na tela de entrada só faltando o apelido.
+ *
+ * Usa location.origin pelo mesmo motivo do endereço escrito no
+ * telão: se a página foi aberta pelo IP da rede, é esse IP que o
+ * celular precisa receber.
+ */
+function desenharQr(codigo) {
+  const caixa = $("qr-sala");
+  caixa.replaceChildren();
+
+  try {
+    const qr = qrcode(0, "M"); // 0 = o menor tamanho que couber
+    qr.addData(`${location.origin}/jogar.html?codigo=${codigo}`);
+    qr.make();
+    // O SVG é gerado pela biblioteca a partir de um endereço nosso.
+    caixa.innerHTML = qr.createSvgTag({ cellSize: 6, margin: 2, scalable: true });
+  } catch {
+    // Sem QR, o código escrito continua lá: é só um atalho a menos.
+    caixa.classList.add("escondido");
+  }
 }
 
 // ----- Botões -----

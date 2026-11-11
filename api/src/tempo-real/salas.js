@@ -198,6 +198,7 @@ const chavePerguntas = (codigo) => `sala:${codigo}:perguntas`;
 const chaveRespostas = (codigo, indice) => `sala:${codigo}:respostas:${indice}`;
 const chavePontos = (codigo) => `sala:${codigo}:pontos`;
 const chaveContas = (codigo) => `sala:${codigo}:contas`;
+const chaveSequencias = (codigo) => `sala:${codigo}:sequencias`;
 
 /**
  * Anota que este jogador da sala é esta conta.
@@ -312,6 +313,25 @@ export async function lerRespostas(codigo, indice) {
     jogadorId,
     ...JSON.parse(valor)
   }));
+}
+
+/** Quantos acertos seguidos cada jogador tem: { jogadorId: n }. */
+export async function lerSequencias(codigo) {
+  const bruto = await redis.hgetall(chaveSequencias(codigo));
+  return Object.fromEntries(Object.entries(bruto).map(([id, n]) => [id, Number(n)]));
+}
+
+/**
+ * Troca as sequências pelas novas. Quem não está no objeto zerou
+ * (errou ou não respondeu) — por isso apaga e regrava, em vez de
+ * incrementar um por um.
+ */
+export async function gravarSequencias(codigo, sequencias) {
+  const lote = redis.multi().del(chaveSequencias(codigo));
+  if (Object.keys(sequencias).length > 0) {
+    lote.hset(chaveSequencias(codigo), sequencias).expire(chaveSequencias(codigo), VALIDADE_SEGUNDOS);
+  }
+  await lote.exec();
 }
 
 /** Soma pontos ao jogador e devolve o total novo. */

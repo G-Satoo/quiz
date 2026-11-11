@@ -81,6 +81,20 @@ jobs:
         # roda com pipefail, então a falha do teste continua falhando.
         run: npm run test:integracao 2>&1 | tee saida-integracao.txt
 
+      # Um navegador de verdade joga uma partida inteira pelas telas.
+      # É o que pega defeito no JavaScript das páginas, que os testes
+      # de integração (só servidor) não enxergam.
+      - name: Instalar o navegador dos testes de tela
+        working-directory: api
+        run: npx playwright install --with-deps chromium
+
+      - name: Testes de tela (ponta a ponta)
+        working-directory: api
+        env:
+          DATABASE_URL_TESTE: postgres://quiz:quiz123@localhost:5438/quiz_teste
+          REDIS_URL_TESTE: redis://localhost:6383
+        run: npm run test:e2e
+
       # Se algo falhou, o nome de cada teste que quebrou vira uma
       # anotação do job: aparece no resumo da execução, sem precisar
       # abrir o log inteiro.

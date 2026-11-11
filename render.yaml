@@ -1,0 +1,54 @@
+# ============================================================
+# Deploy no Render (render.com), pelo "Blueprint".
+#
+# No painel do Render: New > Blueprint > escolha este repositório.
+# Ele lê este arquivo e cria os três serviços abaixo, já ligados.
+#
+# Tudo no plano gratuito. Limites que valem saber:
+#   - o serviço web "dorme" após 15 min sem acesso (o primeiro
+#     acesso depois disso leva uns 50 s para acordar);
+#   - o Postgres gratuito expira depois de 30 dias.
+# ============================================================
+
+services:
+  - type: web
+    name: quiz
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: quiz-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: quiz-redis
+          property: connectionString
+      # Atrás do proxy do Render: o IP de quem acessa vem no
+      # cabeçalho, e o cookie de sessão só trafega por HTTPS.
+      - key: CONFIAR_PROXY
+        value: "true"
+      - key: COOKIE_SEGURO
+        value: "true"
+      # A IA. Com "falso" o site sobe sem chave nenhuma, mas a
+      # moderação aprova tudo — troque por "gemini" e preencha
+      # IA_CHAVE no painel (ela nunca entra neste arquivo).
+      - key: IA_PROVEDOR
+        value: falso
+      - key: IA_CHAVE
+        sync: false
+      - key: IA_MODELO
+        value: gemini-3.6-flash
+
+  - type: keyvalue
+    name: quiz-redis
+    plan: free
+    ipAllowList: []
+
+databases:
+  - name: quiz-db
+    plan: free
+    databaseName: quiz
+    user: quiz

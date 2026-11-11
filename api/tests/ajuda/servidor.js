@@ -75,7 +75,7 @@ export function criarCliente(base) {
     post: (caminho, corpo) => pedir("POST", caminho, corpo),
     put: (caminho, corpo) => pedir("PUT", caminho, corpo),
     patch: (caminho, corpo) => pedir("PATCH", caminho, corpo),
-    delete: (caminho) => pedir("DELETE", caminho),
+    delete: (caminho, corpo) => pedir("DELETE", caminho, corpo),
 
     // Para testar o que acontece sem login, com sessão inválida,
     // ou com um cookie guardado antes do logout (simulando um

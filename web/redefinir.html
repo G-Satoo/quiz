@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- O token está na URL: sem isto ele iria no cabeçalho Referer
+       de qualquer link clicado a partir desta página. -->
+  <meta name="referrer" content="no-referrer">
+  <title>Senha nova — Quiz</title>
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+  <div class="topo">
+    <a class="marca" href="index.html">quiz<span>.</span></a>
+  </div>
+
+  <div class="conteudo" style="max-width:400px">
+
+    <!-- 1. Pedir o link (sem token na URL) -->
+    <section id="tela-pedir" class="escondido">
+      <h1>Esqueci a senha</h1>
+      <p class="subtitulo">Informe o e-mail da conta. Enviamos um link para você criar uma senha nova.</p>
+
+      <div class="cartao">
+        <div id="erro-pedir" class="erro escondido"></div>
+        <div id="ok-pedir" class="aviso escondido"></div>
+
+        <form id="formulario-pedir">
+          <label for="email">E-mail</label>
+          <input id="email" type="email" autocomplete="email" required>
+          <button type="submit" class="largo" id="botao-pedir">Enviar link</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- 2. Escolher a senha nova (com token na URL) -->
+    <section id="tela-trocar" class="escondido">
+      <h1>Senha nova</h1>
+      <p class="subtitulo">Escolha a senha nova da sua conta.</p>
+
+      <div class="cartao">
+        <div id="erro-trocar" class="erro escondido"></div>
+        <div id="ok-trocar" class="aviso escondido"></div>
+
+        <form id="formulario-trocar">
+          <label for="senha">Senha nova</label>
+          <input id="senha" type="password" autocomplete="new-password" minlength="8" required>
+          <label for="senha2">Repita a senha</label>
+          <input id="senha2" type="password" autocomplete="new-password" minlength="8" required>
+          <button type="submit" class="largo" id="botao-trocar">Trocar senha</button>
+        </form>
+      </div>
+    </section>
+
+    <p style="text-align:center;margin-top:18px">
+      <a href="index.html" style="font-size:13px">← Voltar ao catálogo</a>
+    </p>
+  </div>
+
+<script type="module">
+// ============================================================
+// Recuperar senha
+//
+// Uma página, dois momentos: sem ?token=, pede o e-mail; com ele
+// (é o link que a pessoa recebeu), pede a senha nova. O token vale
+// 30 minutos e uma vez só — quem confere é o servidor.
+// ============================================================
+
+const $ = (id) => document.getElementById(id);
+const token = new URLSearchParams(location.search).get("token");
+
+$(token ? "tela-trocar" : "tela-pedir").classList.remove("escondido");
+
+async function enviar(caminho, corpo) {
+  const resposta = await fetch(caminho, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(corpo)
+  });
+  const dados = await resposta.json().catch(() => null);
+  if (!resposta.ok) throw new Error(dados?.erro ?? "Não deu certo. Tente de novo.");
+  return dados;
+}
+
+function avisar(prefixo, tipo, texto) {
+  $(`erro-${prefixo}`).classList.add("escondido");
+  $(`ok-${prefixo}`).classList.add("escondido");
+  const alvo = $(`${tipo}-${prefixo}`);
+  alvo.textContent = texto;
+  alvo.classList.remove("escondido");
+}
+
+$("formulario-pedir").addEventListener("submit", async (evento) => {
+  evento.preventDefault();
+  $("botao-pedir").disabled = true;
+
+  try {
+    const { mensagem } = await enviar("/api/senhas/esqueci", { email: $("email").value });
+    avisar("pedir", "ok", mensagem);
+    $("formulario-pedir").classList.add("escondido");
+  } catch (erro) {
+    avisar("pedir", "erro", erro.message === "Failed to fetch" ? "Não consegui falar com o servidor." : erro.message);
+    $("botao-pedir").disabled = false;
+  }
+});
+
+$("formulario-trocar").addEventListener("submit", async (evento) => {
+  evento.preventDefault();
+
+  if ($("senha").value !== $("senha2").value) {
+    return avisar("trocar", "erro", "As duas senhas não são iguais.");
+  }
+
+  $("botao-trocar").disabled = true;
+
+  try {
+    const { mensagem } = await enviar("/api/senhas/redefinir", { token, senha: $("senha").value });
+    avisar("trocar", "ok", mensagem);
+    $("formulario-trocar").classList.add("escondido");
+
+    // O token já não vale: tira da barra de endereço e do histórico.
+    history.replaceState(null, "", "redefinir.html");
+  } catch (erro) {
+    avisar("trocar", "erro", erro.message === "Failed to fetch" ? "Não consegui falar com o servidor." : erro.message);
+    $("botao-trocar").disabled = false;
+  }
+});
+</script>
+</body>
+</html>

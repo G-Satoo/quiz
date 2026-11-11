@@ -1586,3 +1586,80 @@ describe("categoria automática", () => {
     assert.equal(lido.quiz.categoria, "geral");
   });
 });
+
+describe("recuperar senha", () => {
+  /** Pede o link e devolve o token que o servidor escreveu no log. */
+  async function pedirLink(email) {
+    const original = console.log;
+    let escrito = "";
+    console.log = (...partes) => { escrito += partes.join(" "); };
+    try {
+      const resposta = await cliente.post("/api/senhas/esqueci", { email });
+      return { resposta, token: escrito.match(/token=([\w-]+)/)?.[1] ?? null };
+    } finally {
+      console.log = original;
+    }
+  }
+
+  it("o link troca a senha, vale uma vez só e derruba as sessões antigas", async () => {
+    const { resposta, token } = await pedirLink("dono@exemplo.com");
+    assert.equal(resposta.status, 200);
+    assert.ok(token);
+
+    const troca = await cliente.post("/api/senhas/redefinir", { token, senha: "senha-nova-boa" });
+    assert.equal(troca.status, 200);
+
+    // A sessão que estava aberta com a senha antiga caiu.
+    assert.equal((await cliente.get("/api/usuarios/eu")).status, 401);
+
+    // O mesmo link não serve de novo.
+    const repetida = await cliente.post("/api/senhas/redefinir", { token, senha: "outra-senha-boa" });
+    assert.equal(repetida.status, 400);
+
+    cliente.esquecerCookie();
+    const antiga = await cliente.post("/api/sessoes", { email: "dono@exemplo.com", senha: "uma-senha-boa" });
+    assert.equal(antiga.status, 401);
+    const nova = await cliente.post("/api/sessoes", { email: "dono@exemplo.com", senha: "senha-nova-boa" });
+    assert.equal(nova.status, 201);
+  });
+
+  it("e-mail sem conta recebe a mesma resposta, e nenhum link é gerado", async () => {
+    const existente = await pedirLink("dono@exemplo.com");
+    const inexistente = await pedirLink("ninguem@exemplo.com");
+
+    assert.equal(inexistente.resposta.status, 200);
+    assert.deepEqual(inexistente.resposta.dados, existente.resposta.dados);
+    assert.equal(inexistente.token, null);
+  });
+
+  it("recusa token inventado e senha fraca", async () => {
+    const inventado = await cliente.post("/api/senhas/redefinir", { token: "x".repeat(43), senha: "senha-nova-boa" });
+    assert.equal(inventado.status, 400);
+
+    const { token } = await pedirLink("dono@exemplo.com");
+    const fraca = await cliente.post("/api/senhas/redefinir", { token, senha: "123" });
+    assert.equal(fraca.status, 400);
+  });
+});
+
+describe("apagar a conta", () => {
+  it("exige a senha certa; com ela, a conta some e a sessão acaba", async () => {
+    await criarQuiz("Rascunho");
+    const publicado = await criarQuiz("No catálogo");
+    await publicar(publicado);
+
+    assert.equal((await cliente.delete("/api/usuarios/eu", { senha: "errada" })).status, 403);
+    assert.equal((await cliente.delete("/api/usuarios/eu", {})).status, 400);
+
+    assert.equal((await cliente.delete("/api/usuarios/eu", { senha: "uma-senha-boa" })).status, 204);
+    assert.equal((await cliente.get("/api/usuarios/eu")).status, 401);
+
+    cliente.esquecerCookie();
+    const login = await cliente.post("/api/sessoes", { email: "dono@exemplo.com", senha: "uma-senha-boa" });
+    assert.equal(login.status, 401);
+
+    // O quiz do catálogo fica no site; o rascunho foi junto.
+    const { rows } = await pool.query("SELECT titulo FROM quizzes");
+    assert.deepEqual(rows, [{ titulo: "No catálogo" }]);
+  });
+});

@@ -57,3 +57,25 @@ export function pontosDoAcerto(segundos, decorridoMs) {
 
   return Math.round((PONTOS_ACERTO + PONTOS_VELOCIDADE * sobrou) * fatorDoTempo(segundos));
 }
+
+// ------------------------------------------------------------
+// Sequência de acertos
+//
+// Acertar seguido rende um bônus sobre os pontos da pergunta: +10%
+// a partir do segundo acerto consecutivo, +20% no terceiro, até
+// +50%. Errar (ou não responder) zera a sequência.
+//
+// É percentual, e não um valor fixo, para respeitar o peso do tempo:
+// um bônus fixo de 100 pontos numa pergunta de 300 segundos valeria
+// mais que a própria pergunta.
+// ------------------------------------------------------------
+
+export const BONUS_POR_ACERTO_SEGUIDO = 0.1;
+export const SEQUENCIA_MAXIMA_NO_BONUS = 6; // 6 seguidos = +50%, e para aí
+
+/** `sequencia` já conta o acerto atual: 1 é o primeiro, sem bônus. */
+export function bonusDaSequencia(pontos, sequencia) {
+  const degraus = Math.min(sequencia, SEQUENCIA_MAXIMA_NO_BONUS) - 1;
+  if (degraus <= 0) return 0;
+  return Math.round(pontos * BONUS_POR_ACERTO_SEGUIDO * degraus);
+}

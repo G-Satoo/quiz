@@ -129,7 +129,7 @@ router.get("/", async (req, res, next) => {
                 WHERE p.quiz_id = q.id AND p.ativa)::int AS perguntas,
               (SELECT COUNT(*) FILTER (WHERE a.ocorrido_em >= now() - interval '7 days')
                  FROM aberturas a WHERE a.quiz_id = q.id)::int AS acessos_semana,
-              (SELECT COUNT(*) FILTER (WHERE a.ocorrido_em >= date_trunc('day', now()))
+              (SELECT COUNT(*) FILTER (WHERE a.ocorrido_em >= inicio_do_dia())
                  FROM aberturas a WHERE a.quiz_id = q.id)::int AS acessos_hoje,
               (SELECT ROUND(AVG(v.nota), 1)::float FROM avaliacoes v
                  JOIN resultados r USING (sala, jogador_id)

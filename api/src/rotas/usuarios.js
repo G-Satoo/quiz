@@ -9,8 +9,8 @@
 import express, { Router } from "express";
 
 import { pool } from "../../db/pool.js";
-import { gerarHash } from "../servicos/senha.js";
-import { criarSessao, NOME_COOKIE, opcoesCookie } from "../servicos/sessao.js";
+import { conferirSenha, gerarHash } from "../servicos/senha.js";
+import { criarSessao, encerrarSessoesDoUsuario, NOME_COOKIE, opcoesCookie } from "../servicos/sessao.js";
 import { limitar } from "../middlewares/limite.js";
 import { exigirLogin } from "../middlewares/autenticacao.js";
 import { ErroIA, moderarBanner, moderarFoto, moderarTextoPerfil } from "../servicos/ia.js";
@@ -249,6 +249,76 @@ router.put(
       );
 
       res.json({ banner: rows[0].banner });
+    } catch (erro) {
+      next(erro);
+    }
+  }
+);
+
+/**
+ * GET /api/usuarios/eu/partidas
+ *
+ * As últimas partidas que a pessoa jogou LOGADA: quiz, posição,
+ * pontos e quantos jogaram. Partida jogada sem conta não aparece —
+ * não há como saber que aquele apelido era ela.
+ *
+ * `valeu` diz se a partida somou no ranking (ver gravarResultados):
+ * a tela mostra, para ninguém estranhar pontos que não entraram.
+ */
+router.get("/eu/partidas", exigirLogin, async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT r.id, r.pontos, r.posicao, r.terminado_em, r.vale_ranking AS valeu,
+              q.id AS quiz_id, q.titulo AS quiz,
+              (q.situacao = 'publicado') AS no_catalogo,
+              (SELECT COUNT(*) FROM resultados o WHERE o.sala = r.sala)::int AS jogadores
+         FROM resultados r
+         JOIN quizzes q ON q.id = r.quiz_id
+        WHERE r.usuario_id = $1
+        ORDER BY r.terminado_em DESC
+        LIMIT 20`,
+      [req.usuarioId]
+    );
+
+    res.json({ partidas: rows });
+  } catch (erro) {
+    next(erro);
+  }
+});
+
+/**
+ * DELETE /api/usuarios/eu
+ * body: { senha }
+ *
+ * Apaga a conta. Pede a senha de novo: é irreversível, e uma sessão
+ * esquecida aberta num computador não pode bastar para isso.
+ *
+ * O que vai junto e o que fica está na migração 017: rascunhos,
+ * foto, banner e denúncias saem com a conta; os quizzes que já são
+ * do catálogo ficam no site, sem autor; as partidas jogadas ficam
+ * como resultado anônimo (não quebram o placar de quem jogou junto).
+ */
+router.delete(
+  "/eu",
+  exigirLogin,
+  limitar({ nome: "apagar-conta", max: 5, janela: 60 * 60, chave: (req) => req.usuarioId }),
+  async (req, res, next) => {
+    try {
+      const { senha } = req.body ?? {};
+      if (typeof senha !== "string" || senha === "") {
+        return res.status(400).json({ erro: "Digite a sua senha para confirmar" });
+      }
+
+      const { rows } = await pool.query("SELECT senha_hash FROM usuarios WHERE id = $1", [req.usuarioId]);
+      if (rows.length === 0 || !(await conferirSenha(senha, rows[0].senha_hash))) {
+        return res.status(403).json({ erro: "Senha incorreta" });
+      }
+
+      await pool.query("DELETE FROM usuarios WHERE id = $1", [req.usuarioId]);
+      await encerrarSessoesDoUsuario(req.usuarioId);
+      res.clearCookie(NOME_COOKIE, { ...opcoesCookie(), maxAge: undefined });
+
+      res.status(204).end();
     } catch (erro) {
       next(erro);
     }

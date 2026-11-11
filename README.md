@@ -5,11 +5,38 @@ entram pelo celular com um código, e as perguntas aparecem para
 todo mundo ao mesmo tempo — com cronômetro e placar atualizando em
 tempo real.
 
-`Node 22` · `React 18` · `PostgreSQL 16` · `Redis 7` · `WebSocket` · `Docker Compose` · `85 testes`
+`Node 22` · `PostgreSQL 16` · `Redis 7` · `WebSocket` · `Docker Compose` · `Playwright` · `217 testes`
 
-> **Em construção.** As fases 1 a 3 estão prontas: já dá para
-> criar um quiz, abrir uma sala, as pessoas entrarem pelo celular
-> e jogarem a partida inteira, com cronômetro e placar ao vivo.
+![testes](https://github.com/G-Satoo/quiz/actions/workflows/testes.yml/badge.svg)
+
+![Catálogo de quizzes](docs/capturas/catalogo.png)
+
+| O telão, esperando a turma | Fim da partida |
+|---|---|
+| ![Sala de espera com código e QR](docs/capturas/sala-de-espera.png) | ![Pódio](docs/capturas/podio.png) |
+
+| No celular de quem joga | O resultado de cada pergunta |
+|---|---|
+| <img src="docs/capturas/celular-pergunta.png" width="260" alt="Pergunta no celular"> | <img src="docs/capturas/celular-resultado.png" width="260" alt="Resultado no celular"> |
+
+## O que dá para fazer
+
+- **Jogar ao vivo.** O apresentador abre a sala; a turma entra pelo
+  celular com o código ou apontando a câmera para o QR. Cronômetro
+  do servidor, placar a cada pergunta, bônus por acertos seguidos e
+  pódio no fim.
+- **Criar quizzes**, à mão ou com IA (Gemini ou qualquer provedor
+  compatível com a API da OpenAI). O tema do quiz é fixo, e gerar
+  de novo traz perguntas novas, sem repetir as que já existem.
+- **Catálogo público moderado.** Um quiz só entra no catálogo
+  depois que a IA lê perguntas e capa; ela também define a
+  categoria. Quem joga pode denunciar, e um administrador decide.
+- **Montar a partida por tempo**: 30 minutos, 1 hora, 2 horas, ou
+  ajustando quantas perguntas e quantos segundos cada uma.
+- **Ranking** do dia, da semana e de todos os tempos, só entre quem
+  joga com conta — com travas contra inflar pontos.
+- **Perfil** com foto, imagem de fundo, bio, cor e o histórico das
+  partidas; recuperar senha e apagar a conta.
 
 ## O que é
 
@@ -34,12 +61,22 @@ cd api
 cp .env.example .env
 npm install
 npm run migrar                # cria as tabelas
-npm run semear                # um quiz de exemplo (opcional)
-npm run dev                   # API em :3003
+npm run semear                # a conta de demonstração e um quiz
+npm run semear:catalogo       # 30 quizzes, jogadores e partidas (opcional)
+npm run dev                   # site em http://localhost:3003
 ```
 
-Se rodou o `semear`, a conta de demonstração é **demo@quiz.dev** /
-**demo12345**.
+A conta de demonstração é **demo@quiz.dev** / **demo12345**. Para
+ela moderar denúncias: `npm run admin -- demo@quiz.dev`.
+
+**A IA é opcional.** Com `IA_PROVEDOR=falso` (o padrão do
+`.env.example`) tudo funciona sem chave: a geração devolve perguntas
+de exemplo e a moderação aprova. Para usar de verdade, ponha
+`IA_PROVEDOR=gemini` e a sua chave em `IA_CHAVE`, no `.env` — que
+fica fora do git.
+
+**Recuperar senha** não envia e-mail (não há provedor configurado):
+o link aparece no log do servidor.
 
 As portas fogem do padrão de propósito, para este projeto e o
 [atalho](https://github.com/G-Satoo/atalho) rodarem ao mesmo tempo:
@@ -173,6 +210,9 @@ npm test                 # unidade, não precisa de banco
 
 docker compose --profile teste up -d db-teste redis-teste
 npm run test:integracao  # contra Postgres e Redis de verdade
+
+npx playwright install chromium   # só na primeira vez
+npm run test:e2e         # um navegador joga uma partida pelas telas
 ```
 
 Os de integração sobem o Express numa porta aleatória e falam com
@@ -186,36 +226,75 @@ garantias que o **banco** dá sozinho, falando SQL direto, sem
 passar pela API: são as regras que continuam valendo mesmo que um
 bug escape da validação.
 
+O teste de ponta a ponta (`tests/e2e/`) existe por causa de um
+defeito real: a tela do jogador só aceitava resposta na primeira
+pergunta de cada partida, e os testes de integração passavam todos —
+eles falam com o servidor, e o erro estava no JavaScript da página.
+Agora um navegador de verdade abre o telão e o celular, e joga até
+o pódio.
+
 ## API
 
-Tudo abaixo de `/api/quizzes` exige o cookie de sessão.
+Ler o catálogo, o ranking e os perfis é público. Criar, editar,
+apresentar e denunciar exigem o cookie de sessão.
+
+**Contas**
 
 | Método | Rota | O que faz |
 |---|---|---|
 | `POST` | `/api/usuarios` | Cria a conta e já deixa logado |
 | `GET` | `/api/usuarios/eu` | Quem está logado |
-| `POST` | `/api/sessoes` | Login |
-| `DELETE` | `/api/sessoes` | Logout |
-| `GET` | `/api/quizzes` | Lista os quizzes com a contagem de perguntas |
-| `POST` | `/api/quizzes` | Cria um quiz vazio |
-| `GET` | `/api/quizzes/:id` | O quiz inteiro, com perguntas e alternativas |
-| `PATCH` | `/api/quizzes/:id` | Muda título e descrição |
-| `DELETE` | `/api/quizzes/:id` | Apaga o quiz e tudo dele |
-| `PUT` | `/api/quizzes/:id/perguntas` | Substitui todas as perguntas, numa transação |
-| `POST` | `/api/salas` | Abre uma sala ao vivo para um quiz e devolve o código |
-| `GET` | `/api/salas/:codigo` | Pública: confere se a sala existe (tela de entrada) |
-| `POST` | `/api/geracao/perguntas` | Gera perguntas por IA para o rascunho do editor |
+| `PATCH` | `/api/usuarios/eu` | Nome, bio e cor (nome e bio passam pela IA) |
+| `DELETE` | `/api/usuarios/eu` | Apaga a conta (pede a senha) |
+| `GET` | `/api/usuarios/eu/perfil` | O perfil com os números de quem está logado |
+| `GET` | `/api/usuarios/eu/partidas` | As últimas partidas jogadas |
+| `PUT` `DELETE` | `/api/usuarios/eu/foto`, `/eu/banner` | Foto e imagem de fundo (moderadas) |
+| `GET` | `/api/usuarios/:id` | Perfil público, sem e-mail |
+| `POST` `DELETE` | `/api/sessoes` | Login e logout |
+| `POST` | `/api/senhas/esqueci`, `/redefinir` | Recuperação de senha por link de uso único |
+
+**Quizzes**
+
+| Método | Rota | O que faz |
+|---|---|---|
+| `GET` | `/api/quizzes` | O catálogo (`?categoria=`, `?autor=`, `?meus=1`) |
+| `POST` | `/api/quizzes` | Cria o quiz com as perguntas, numa transação |
+| `GET` | `/api/quizzes/:id` | O quiz inteiro (gabarito só para o dono) |
+| `PATCH` | `/api/quizzes/:id` | Título e descrição (só rascunho) |
+| `DELETE` | `/api/quizzes/:id` | Apaga (só o que ainda não é do catálogo) |
+| `PUT` | `/api/quizzes/:id/perguntas` | Substitui todas as perguntas |
+| `PATCH` | `/api/quizzes/:id/perguntas/:perguntaId` | Tira ou devolve uma pergunta à partida |
+| `PUT` `DELETE` `GET` | `/api/quizzes/:id/capa` | A capa, enviada como arquivo |
+| `POST` | `/api/quizzes/:id/copia` | Duplica para a sua conta |
+| `POST` | `/api/quizzes/:id/publicar` | Pede aprovação: a IA analisa e decide |
+| `POST` | `/api/quizzes/:id/denuncias` | Denuncia um quiz do catálogo |
+| `POST` | `/api/geracao/perguntas` | Gera perguntas por IA para o rascunho |
+| `POST` | `/api/geracao/conferir` | A IA confere o gabarito de uma pergunta |
+
+**Partidas, ranking e moderação**
+
+| Método | Rota | O que faz |
+|---|---|---|
+| `POST` | `/api/salas` | Abre uma sala ao vivo e devolve o código |
+| `GET` | `/api/salas/:codigo` | Pública: confere se a sala existe |
+| `GET` | `/api/ranking/hoje`, `/semana`, `/sempre` | Os dez que mais pontuaram no período |
+| `GET` | `/api/moderacao/fila` | O que espera decisão do administrador |
+| `POST` | `/api/moderacao/:id` | O administrador aprova ou recusa |
 | `GET` | `/health` | Estado da API, do banco e do Redis |
 
 ## Telas
 
-Servidas pela própria API, em `web/`:
+Servidas pela própria API, em `web/` — HTML, CSS e JavaScript sem
+etapa de build:
 
 | página | para quem |
 |---|---|
-| `/apresentar.html` | lista seus quizzes, abre a sala e conduz a partida |
-| `/editor.html` | cria e edita quizzes, e gera perguntas por IA |
-| `/` | tela de quem joga: código, apelido e as respostas |
+| `/` | o catálogo; e, para quem apresenta, o telão da partida |
+| `/editor.html` | criar e editar o quiz, gerar com IA e montar a partida |
+| `/jogar.html` | quem joga: código, apelido e as respostas |
+| `/perfil.html` | o seu perfil (ou o público, com `?id=`) |
+| `/moderacao.html` | a fila do administrador |
+| `/redefinir.html` | esqueci a senha |
 
 ## WebSocket
 
@@ -231,10 +310,11 @@ Mensagens são JSON com um campo `tipo`.
 | mensagem | quem manda |
 |---|---|
 | `{ tipo: "apresentar", codigo }` | o dono do quiz, identificado pelo cookie de sessão |
-| `{ tipo: "entrar", codigo, apelido, jogadorId? }` | o jogador, sem conta (o id retoma o lugar numa reconexão) |
+| `{ tipo: "entrar", codigo, apelido, jogadorId? }` | o jogador (o id retoma o lugar numa reconexão) |
 | `{ tipo: "comecar" }` | o dono inicia a partida |
 | `{ tipo: "responder", alternativaId }` | o jogador responde |
 | `{ tipo: "proxima" }` | o dono avança |
+| `{ tipo: "avaliar", nota }` | o jogador dá nota ao quiz, depois do fim |
 
 **Do servidor:**
 
@@ -244,11 +324,38 @@ Mensagens são JSON com um campo `tipo`.
 | `{ tipo: "jogadores", jogadores: [...] }` | a lista mudou (cada um com `online`) |
 | `{ tipo: "pergunta", enunciado, alternativas, segundos }` | uma pergunta abriu |
 | `{ tipo: "respondeu", quantos, total }` | alguém respondeu (só para o apresentador) |
-| `{ tipo: "sua-resposta", acertou, ganhos }` | o resultado daquele jogador, só para ele |
+| `{ tipo: "sua-resposta", acertou, ganhos, bonus, sequencia }` | o resultado daquele jogador, só para ele |
 | `{ tipo: "resultado", distribuicao, placar }` | a pergunta fechou |
 | `{ tipo: "fim", placar }` | acabou a partida |
 | `{ tipo: "sala-encerrada" }` | o apresentador não voltou |
 | `{ tipo: "erro", codigo, mensagem }` | deu errado (e a conexão fecha com 1008) |
+
+## Pontuação e ranking
+
+- Um acerto vale metade fixa e metade pela velocidade, e o total é
+  pesado pelo tempo da pergunta: 10 segundos valem até 1.000 pontos;
+  60 segundos, até 408. Quem mede o tempo é o servidor.
+- Acertar seguido dá bônus: +10% no segundo acerto consecutivo, até
+  +50% no sexto. Errar ou não responder zera a sequência.
+- O ranking só soma partidas de **quiz do catálogo**, jogadas **com
+  conta**. O autor não pontua no próprio quiz, e só a primeira
+  partida do dia em cada quiz conta — repetir um quiz decorado não
+  rende pontos.
+- O dia e a semana viram à meia-noite de Brasília.
+
+## Deploy
+
+O `Dockerfile` da raiz monta uma imagem com a API e as telas:
+
+```bash
+docker build -t quiz .
+docker run -p 3003:3003 --env-file api/.env quiz
+```
+
+O `render.yaml` descreve o deploy no [Render](https://render.com)
+(serviço web, Postgres e Redis, no plano gratuito): no painel, **New
+> Blueprint** e escolha este repositório. A chave da IA é preenchida
+lá, nunca no repositório.
 
 ## Roteiro
 
@@ -257,26 +364,32 @@ Mensagens são JSON com um campo `tipo`.
 | 1 | contas, quizzes, perguntas, testes, CI | **pronta** |
 | 2 | sala ao vivo, código de entrada, WebSocket, lista de quem entrou | **pronta** |
 | 3 | a partida: pergunta, cronômetro autoritativo, respostas, placar | **pronta** |
-| 4 | pub/sub entre instâncias | **pronta** · falta retomar partida após restart do servidor |
-| 5 | histórico, relatório pós-partida, painel em React e deploy | a seguir |
-
-A reconexão de quem cai (jogador e apresentador) estava planejada
-para a fase 4, mas foi trazida para cá: sem ela o sistema parece
-quebrado na primeira vez que alguém usa de verdade.
+| 4 | pub/sub entre instâncias, reconexão de quem cai | **pronta** · falta retomar partida após restart do servidor |
+| 5 | catálogo, geração e moderação por IA, capas, denúncias | **pronta** |
+| 6 | ranking, perfil, histórico, pódio, QR, recuperação de senha | **pronta** |
+| 7 | envio de e-mail de verdade, relatório pós-partida para o apresentador | a seguir |
 
 ## Estrutura
 
 ```
 api/
   db/
-    migracoes/      001-usuarios.sql, 002-quizzes.sql
+    migracoes/      001 a 020, aplicadas em ordem por migrar.js
     migrar.js       runner com transação e lock
     pool.js
+  scripts/          semear, semear-catalogo, tornar-admin, capturas
   src/
-    rotas/          usuarios, sessoes, quizzes
-    servicos/       senha, sessao
+    rotas/          usuarios, sessoes, senhas, quizzes, salas,
+                    geracao, ranking, moderacao
+    servicos/       ia, moderacao, capa, imagem, senha, sessao
+    tempo-real/     servidor-ws, partida, salas, pontuacao, transmissao
     middlewares/    autenticacao, limite (rate limit)
-    util/           validacao
+    util/           validacao, codigo
     server.js
-  tests/            unidade + integracao
+  tests/            unidade, integracao/ e e2e/
+web/                as telas (HTML, CSS e JS sem build)
+docs/capturas/      as imagens deste README
+Dockerfile
+render.yaml
+docker-compose.yml
 ```

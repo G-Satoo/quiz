@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 
 import { prepararBanco, limpar, encerrarConexoes } from "../ajuda/banco.js";
 import { subirServidor } from "../ajuda/servidor.js";
+import { pool } from "../../db/pool.js";
 import { conectar } from "../ajuda/cliente-ws.js";
 import { MIN_PERGUNTAS } from "../../src/util/validacao.js";
 
@@ -655,5 +656,131 @@ describe("partida com quantidade e tempo escolhidos", () => {
 
     assert.equal(primeira.total, 12);
     assert.equal(primeira.segundos, 10);
+  });
+});
+
+/** Abre outra sala para um quiz que já existe (e já foi publicado). */
+async function abrirSalaDe(quizId) {
+  const { dados } = await cliente.post("/api/salas", { quiz_id: quizId });
+  const host = await abrir({ cookie: cliente.cookieAtual });
+  host.enviar({ tipo: "apresentar", codigo: dados.sala.codigo });
+  await host.esperar("bem-vindo");
+  return { codigo: dados.sala.codigo, host };
+}
+
+async function entrarComConta(codigo, cookie, apelido) {
+  const conexao = await abrir({ cookie });
+  conexao.enviar({ tipo: "entrar", codigo, apelido });
+  await conexao.esperar("bem-vindo");
+  return conexao;
+}
+
+describe("ranking: travas contra inflar pontos", () => {
+  it("repetir o mesmo quiz no dia só vale a primeira partida", async () => {
+    const hostCookie = cliente.cookieAtual;
+    await cliente.post("/api/usuarios", { nome: "Beatriz", email: "bia@exemplo.com", senha: "uma-senha-boa" });
+    const biaCookie = cliente.cookieAtual;
+    cliente.definirCookie(hostCookie);
+
+    const primeira = await prepararPartida();
+    const { rows } = await pool.query("SELECT id FROM quizzes ORDER BY id DESC LIMIT 1");
+    const quizId = rows[0].id;
+
+    const fim1 = await jogarAteOFim(primeira.host, [await entrarComConta(primeira.codigo, biaCookie, "Bia")]);
+
+    const segunda = await abrirSalaDe(quizId);
+    await jogarAteOFim(segunda.host, [await entrarComConta(segunda.codigo, biaCookie, "Bia")]);
+
+    cliente.esquecerCookie();
+    const { dados } = await cliente.get("/api/ranking/hoje");
+    assert.equal(dados.jogadores.length, 1);
+    assert.equal(dados.jogadores[0].partidas, 1);
+    assert.equal(dados.jogadores[0].pontos, fim1.placar[0].pontos);
+
+    // O histórico mostra as duas, dizendo qual valeu.
+    cliente.definirCookie(biaCookie);
+    const { dados: historico } = await cliente.get("/api/usuarios/eu/partidas");
+    assert.deepEqual(historico.partidas.map((p) => p.valeu), [false, true]);
+    assert.equal(historico.partidas[0].quiz, "Geografia");
+    assert.equal(historico.partidas[0].posicao, 1);
+    assert.equal(historico.partidas[0].jogadores, 1);
+  });
+
+  it("o autor não pontua no próprio quiz", async () => {
+    const { codigo, host, cookie } = await prepararPartida();
+
+    // O dono entra como jogador na própria sala, por outra conexão.
+    await jogarAteOFim(host, [await entrarComConta(codigo, cookie, "Eu mesmo")]);
+
+    cliente.esquecerCookie();
+    const { dados } = await cliente.get("/api/ranking/hoje");
+    assert.deepEqual(dados.jogadores, []);
+  });
+
+  it("semana e sempre somam as mesmas partidas; período inventado não existe", async () => {
+    const hostCookie = cliente.cookieAtual;
+    await cliente.post("/api/usuarios", { nome: "Beatriz", email: "bia@exemplo.com", senha: "uma-senha-boa" });
+    const biaCookie = cliente.cookieAtual;
+    cliente.definirCookie(hostCookie);
+
+    const { codigo, host } = await prepararPartida();
+    await jogarAteOFim(host, [await entrarComConta(codigo, biaCookie, "Bia")]);
+
+    // Uma partida de dez dias atrás: fora do dia e da semana.
+    await pool.query(
+      `INSERT INTO resultados (quiz_id, sala, jogador_id, apelido, pontos, posicao, usuario_id, vale_ranking, terminado_em)
+       SELECT quiz_id, 'ANTIGA', 'x', 'Bia', 5000, 1, usuario_id, TRUE, now() - interval '10 days'
+         FROM resultados LIMIT 1`
+    );
+
+    cliente.esquecerCookie();
+    const hoje = (await cliente.get("/api/ranking/hoje")).dados.jogadores[0].pontos;
+    const semana = (await cliente.get("/api/ranking/semana")).dados.jogadores[0].pontos;
+    const sempre = (await cliente.get("/api/ranking/sempre")).dados.jogadores[0].pontos;
+
+    assert.equal(semana, hoje);
+    assert.equal(sempre, hoje + 5000);
+    assert.equal((await cliente.get("/api/ranking/ano")).status, 404);
+  });
+});
+
+describe("sequência de acertos", () => {
+  it("acertar seguido rende bônus; errar zera", async () => {
+    const { codigo, host } = await prepararPartida();
+    const ana = await entrarJogador(codigo, "Ana");
+
+    // Capital do Brasil: Brasília é a primeira (certa).
+    host.enviar({ tipo: "comecar" });
+    let pergunta = await ana.esperar("pergunta");
+    ana.enviar({ tipo: "responder", alternativaId: pergunta.alternativas[0].id });
+    const primeira = await ana.esperar("sua-resposta");
+    assert.equal(primeira.acertou, true);
+    assert.equal(primeira.sequencia, 1);
+    assert.equal(primeira.bonus, 0);
+
+    // Maior rio: Amazonas é a segunda (certa) — dois seguidos, +10%.
+    host.enviar({ tipo: "proxima" });
+    pergunta = await ana.esperar("pergunta");
+    ana.enviar({ tipo: "responder", alternativaId: pergunta.alternativas[1].id });
+    const segunda = await ana.esperar("sua-resposta");
+    assert.equal(segunda.sequencia, 2);
+    assert.ok(segunda.bonus > 0);
+    assert.equal(segunda.bonus, Math.round((segunda.ganhos - segunda.bonus) * 0.1));
+
+    // Enchimento: a certa é a primeira; responder a segunda erra e zera.
+    host.enviar({ tipo: "proxima" });
+    pergunta = await ana.esperar("pergunta");
+    ana.enviar({ tipo: "responder", alternativaId: pergunta.alternativas[1].id });
+    const terceira = await ana.esperar("sua-resposta");
+    assert.equal(terceira.acertou, false);
+    assert.equal(terceira.sequencia, 0);
+
+    // Acertar de novo recomeça do 1, sem bônus.
+    host.enviar({ tipo: "proxima" });
+    pergunta = await ana.esperar("pergunta");
+    ana.enviar({ tipo: "responder", alternativaId: pergunta.alternativas[0].id });
+    const quarta = await ana.esperar("sua-resposta");
+    assert.equal(quarta.sequencia, 1);
+    assert.equal(quarta.bonus, 0);
   });
 });

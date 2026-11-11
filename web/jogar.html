@@ -74,6 +74,7 @@
       <div class="cartao" style="text-align:center">
         <div class="veredito" id="veredito"></div>
         <div class="ganhos" id="ganhos"></div>
+        <div class="sequencia escondido" id="sequencia"></div>
         <div style="color:var(--texto-fraco);margin-top:18px">
           seu total: <strong id="meu-total">0</strong>
         </div>
@@ -86,6 +87,7 @@
     <!-- 5. Fim -->
     <section id="tela-fim" class="escondido">
       <h1>Fim da partida</h1>
+      <div class="podio" id="podio"></div>
       <div class="cartao" style="text-align:center;margin-bottom:24px">
         <div class="veredito" id="colocacao"></div>
       </div>
@@ -120,6 +122,7 @@
 // ============================================================
 
 import { criarConexao, pintarEstado } from "./conexao.js";
+import { montarPodio } from "./podio.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -147,6 +150,17 @@ function mostrarErro(mensagem) {
   $("erro").classList.remove("escondido");
   $("botao").disabled = false;
   mostrar("entrada");
+}
+
+// ----- Vindo do QR code ou de um link: o código já vem na URL -----
+// Só letras e números, no tamanho de um código: o que vier além
+// disso não é código de sala, e não vai para o campo.
+const codigoDaUrl = (new URLSearchParams(location.search).get("codigo") ?? "")
+  .toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
+
+if (codigoDaUrl) {
+  $("codigo").value = codigoDaUrl;
+  $("apelido").focus();
 }
 
 // ----- Retomar sozinho, se a aba foi recarregada no meio -----
@@ -389,6 +403,8 @@ function mostrarResultado(mensagem) {
 }
 
 function pintarVeredito() {
+  $("sequencia").classList.add("escondido");
+
   if (!meuResultado) {
     $("veredito").textContent = "Você não respondeu";
     $("veredito").className = "veredito errou";
@@ -399,6 +415,13 @@ function pintarVeredito() {
   $("veredito").textContent = meuResultado.acertou ? "Acertou!" : "Errou";
   $("veredito").className = `veredito ${meuResultado.acertou ? "acertou" : "errou"}`;
   $("ganhos").textContent = meuResultado.ganhos > 0 ? `+${meuResultado.ganhos} pontos` : "";
+
+  // Acertos seguidos rendem bônus a partir do segundo (pontuacao.js).
+  if (meuResultado.sequencia >= 2) {
+    $("sequencia").textContent =
+      `🔥 ${meuResultado.sequencia} seguidas` + (meuResultado.bonus > 0 ? ` · bônus de +${meuResultado.bonus}` : "");
+    $("sequencia").classList.remove("escondido");
+  }
 }
 
 function desenharPlacar(elemento, placar) {
@@ -429,6 +452,7 @@ function mostrarFim(mensagem) {
   $("colocacao").textContent =
     posicao === -1 ? "Partida encerrada" : `${posicao + 1}º lugar`;
 
+  montarPodio($("podio"), mensagem.placar, meuId);
   desenharPlacar($("placar-final"), mensagem.placar);
 
   // Só avalia quem está no placar — quem jogou. O servidor confere

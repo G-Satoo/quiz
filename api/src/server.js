@@ -28,6 +28,7 @@ import { redis } from "./redis.js";
 
 import rotasUsuarios from "./rotas/usuarios.js";
 import rotasSessoes from "./rotas/sessoes.js";
+import rotasSenhas from "./rotas/senhas.js";
 import rotasQuizzes from "./rotas/quizzes.js";
 import rotasSalas from "./rotas/salas.js";
 import rotasGeracao from "./rotas/geracao.js";
@@ -89,6 +90,7 @@ app.get("/health", async (req, res) => {
 
 app.use("/api/usuarios", rotasUsuarios);
 app.use("/api/sessoes", rotasSessoes);
+app.use("/api/senhas", rotasSenhas);
 app.use("/api/quizzes", rotasQuizzes);
 app.use("/api/salas", rotasSalas);
 app.use("/api/geracao", rotasGeracao);

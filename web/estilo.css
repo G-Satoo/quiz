@@ -2211,3 +2211,113 @@ button.botao-acao.discreto { border: 1px solid var(--borda); }
   color: var(--texto-fraco);
   white-space: nowrap;
 }
+
+
+/* ============================================================
+   Busca, abas do ranking, QR da sala, pódio, sequência, histórico
+   ============================================================ */
+
+.busca-catalogo { width: 100%; max-width: 420px; margin: 0 0 14px; }
+
+.abas-ranking { display: flex; gap: 6px; }
+.abas-ranking .filtro { padding: 4px 12px; font-size: 12px; }
+.ranking-vazio { margin: 4px 0 0; font-size: 14px; color: var(--texto-fraco); }
+
+/* O QR precisa de fundo branco e margem para a câmera ler. */
+.qr-sala {
+  width: 168px;
+  margin: 22px auto 6px;
+  padding: 8px;
+  border-radius: 10px;
+  background: #fff;
+  line-height: 0;
+}
+.qr-sala svg { width: 100%; height: auto; display: block; }
+.legenda-qr { font-size: 13px; color: var(--texto-fraco); }
+
+/* ----- Pódio ----- */
+.podio {
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 10px;
+  margin: 8px 0 26px;
+}
+
+.degrau {
+  flex: 1;
+  max-width: 170px;
+  min-width: 0;
+  text-align: center;
+  /* Sobem um de cada vez, do 3º ao 1º: --vez vem do podio.js. */
+  animation: subir-podio 0.55s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+  animation-delay: calc(var(--vez, 0) * 0.7s + 0.2s);
+}
+
+.medalha-podio { font-size: 30px; line-height: 1; }
+.nome-podio {
+  margin-top: 6px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pontos-podio { font-family: var(--mono); font-size: 14px; color: var(--texto-fraco); margin-bottom: 8px; }
+
+.base-podio {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 10px;
+  border-radius: 10px 10px 0 0;
+  font-weight: 800;
+  font-size: 20px;
+  color: rgba(0, 0, 0, 0.55);
+}
+.degrau-1 .base-podio { height: 120px; background: linear-gradient(180deg, #facc15, #a16207); }
+.degrau-2 .base-podio { height: 86px; background: linear-gradient(180deg, #d4d4d8, #71717a); }
+.degrau-3 .base-podio { height: 60px; background: linear-gradient(180deg, #f2a33c, #92400e); }
+.degrau.eu .nome-podio { color: var(--destaque); }
+
+@keyframes subir-podio {
+  from { opacity: 0; transform: translateY(40px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ----- Sequência de acertos (tela do jogador) ----- */
+.sequencia { margin-top: 8px; font-weight: 700; color: #f2a33c; }
+
+/* ----- Minhas partidas (perfil) ----- */
+.lista-partidas { list-style: none; margin: 0 0 28px; padding: 0; display: grid; gap: 6px; }
+.lista-partidas li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--borda);
+  border-radius: 10px;
+  background: var(--superficie);
+}
+.posicao-partida {
+  flex: none;
+  width: 38px;
+  font-family: var(--mono);
+  font-weight: 700;
+  color: var(--texto-fraco);
+}
+.posicao-partida.venceu { color: #facc15; }
+.meio-partida { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.quiz-partida { font-weight: 600; color: var(--texto); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detalhe-partida { font-size: 12px; color: var(--texto-fraco); }
+.pontos-partida { font-family: var(--mono); }
+
+.rodape-perfil { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.rodape-perfil .botao-apagar-conta { margin-left: auto; color: var(--erro); }
+
+@media (prefers-reduced-motion: reduce) {
+  .degrau { animation: none; }
+}
+
+/* Título, abas e legenda do ranking na mesma linha quando couber. */
+.cabecalho-fileira:has(.abas-ranking) { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.cabecalho-fileira:has(.abas-ranking) .nota-fileira { flex-basis: 100%; }
