@@ -2798,3 +2798,153 @@ button.botao-acao.discreto { border: 1px solid var(--borda); }
 
 /* Rodapé do editor: salvar e, ao lado, ir para a página do quiz. */
 .rodape-editor { display: flex; flex-wrap: wrap; gap: 10px; }
+
+/* ----- Quiz sem autor à mostra (anônimo ou conta apagada) -----
+   Silhueta cinza no lugar do avatar: sem inicial e sem cor, que
+   diriam algo sobre a pessoa. E nada de cursor de clique: não há
+   perfil para abrir. */
+.avatar-sem-rosto {
+  background: #3b4150;
+  color: #9aa3b5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.avatar-sem-rosto svg { width: 68%; height: 68%; display: block; }
+
+.autor-card.sem-autor { cursor: default; }
+.autor-card.sem-autor:hover .nome-autor { color: inherit; text-decoration: none; }
+.autor-pagina.sem-autor { cursor: default; color: var(--texto-fraco); }
+.autor-pagina.sem-autor:hover span:last-child { text-decoration: none; }
+
+/* Perfil: a opção de publicar como anônimo. */
+.opcao-anonimo {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 16px 0 4px;
+  cursor: pointer;
+}
+.opcao-anonimo input { width: auto; margin-top: 3px; flex: none; }
+.opcao-anonimo span { display: grid; gap: 2px; }
+.opcao-anonimo small { color: var(--texto-fraco); font-weight: 400; }
+
+/* Ranking: cada jogador é um link para o perfil público dele. */
+a.card-jogador { color: inherit; text-decoration: none; transition: transform 0.12s, border-color 0.12s; }
+a.card-jogador:hover, a.card-jogador:focus-visible { transform: translateY(-2px); border-color: var(--destaque, #4ea3ff); }
+a.card-jogador:hover .nome-jogador { text-decoration: underline; }
+
+/* Perfil: "Onde mais pontuou" — as capas dos quizzes em que a pessoa
+   mais somou pontos, na mesma grade das recomendações. */
+.secao-jogados { margin-bottom: 34px; }
+.resumo-jogados { margin: -4px 0 14px; font-size: 14px; color: var(--texto-fraco); }
+.resumo-jogados strong { color: var(--texto); }
+.secao-jogados .meta-card { color: var(--texto-fraco); }
+
+/* Número do perfil que é uma palavra (categoria favorita): a fonte
+   de número, larga, estouraria o cartão. */
+.numero-perfil.numero-texto strong { font-family: inherit; font-size: 18px; overflow-wrap: anywhere; }
+
+/* ----- Perfil público: destaques de autor -----
+   Dois painéis lado a lado: o quiz mais acessado (capa + números) e
+   as categorias em que a pessoa cria (uma barra para cada). */
+.destaques-autor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  margin: 0 0 34px;
+}
+
+.painel-destaque {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--borda);
+  border-radius: var(--raio);
+  background: var(--superficie);
+  color: inherit;
+  text-decoration: none;
+  min-width: 0;
+}
+
+.painel-destaque .rotulo-secao { margin: 0; }
+.titulo-painel { font-size: 20px; line-height: 1.2; overflow-wrap: anywhere; }
+.detalhes-painel { font-size: 12px; color: var(--texto-fraco); }
+
+/* O quiz mais acessado */
+.painel-quiz { align-items: stretch; transition: transform 0.12s, border-color 0.12s; }
+.painel-quiz:hover, .painel-quiz:focus-visible { transform: translateY(-2px); border-color: var(--destaque); }
+.painel-quiz .capa { flex: none; width: 108px; }
+.texto-painel { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.numero-painel { font-size: 13px; color: var(--texto-fraco); }
+.numero-painel strong { font-family: var(--mono); font-size: 26px; color: var(--texto); margin-right: 4px; }
+
+/* As categorias */
+.painel-categorias { flex-direction: column; gap: 8px; }
+.barras-categoria { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 9px; }
+.barras-categoria li {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) 22px;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.nome-barra { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trilho-barra { height: 10px; border-radius: 99px; background: rgba(255, 255, 255, 0.06); overflow: hidden; }
+.enchimento-barra { display: block; height: 100%; border-radius: 99px; min-width: 10px; }
+.valor-barra { font-family: var(--mono); font-size: 12px; color: var(--texto-fraco); text-align: right; }
+
+@media (max-width: 720px) {
+  .destaques-autor { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Perfil: os acessos do quiz mais popular — selo com ícone de
+   pessoa, número grande e a fatia que ele representa. */
+.acessos-painel {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px 12px;
+  margin: 4px 0;
+}
+.icone-acessos {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+.icone-acessos svg { width: 22px; height: 22px; }
+.conta-acessos { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.conta-acessos strong { font-family: var(--mono); font-size: 30px; line-height: 1; }
+.conta-acessos span { font-size: 13px; color: var(--texto-fraco); }
+.fatia-acessos { grid-column: 1 / -1; display: grid; gap: 5px; }
+.fatia-acessos .trilho-barra { display: block; height: 8px; }
+.fatia-acessos small { font-size: 12px; color: var(--texto-fraco); }
+
+/* Números do perfil em fileiras cheias: --colunas vem do JavaScript
+   (arrumarNumeros), e a última fileira estica para não sobrar buraco. */
+.numeros-perfil.arrumado { display: flex; flex-wrap: wrap; }
+.numeros-perfil.arrumado .numero-perfil {
+  flex: 1 1 calc((100% - (var(--colunas) - 1) * 12px) / var(--colunas));
+  min-width: 0;
+}
+@media (max-width: 620px) {
+  .numeros-perfil.arrumado .numero-perfil { flex-basis: calc(50% - 6px); }
+}
+
+/* Números do perfil: valor e legenda centralizados no quadrado. */
+.numero-perfil { align-items: center; justify-content: center; text-align: center; }
+
+/* Números do perfil alinhados entre si: o valor sempre na mesma
+   altura (linha de 32px, inclusive quando é uma palavra) e a legenda
+   logo abaixo, a partir do topo — uma legenda de duas linhas não
+   empurra mais o número para cima. */
+.numero-perfil { justify-content: flex-start; }
+.numero-perfil strong { line-height: 32px; height: 32px; white-space: nowrap; }
+.numero-perfil.numero-texto strong { font-size: 18px; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+
+/* Perfil: respiro entre os cards de quizzes e o histórico de partidas. */
+#secao-partidas { margin-top: 38px; }

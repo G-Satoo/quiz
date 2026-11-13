@@ -56,6 +56,27 @@ export function montarAvatar(nome, classe = "avatar", foto = null, cor = null) {
   return avatar;
 }
 
+// O que escrever quando o quiz não mostra autor (o `autor_situacao`
+// da API): a pessoa preferiu não aparecer, ou a conta não existe mais.
+export const SEM_AUTOR = {
+  anonimo: "Anônimo",
+  desconhecido: "Autor desconhecido"
+};
+
+/**
+ * O avatar de quem não aparece: uma silhueta cinza, sem inicial e
+ * sem cor — as duas coisas diriam algo sobre a pessoa.
+ */
+export function montarAvatarSemRosto(classe = "avatar") {
+  const avatar = document.createElement("span");
+  avatar.className = classe + " avatar-sem-rosto";
+  avatar.setAttribute("aria-hidden", "true");
+  avatar.innerHTML =
+    '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="9" r="4"/>' +
+    '<path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7z"/></svg>';
+  return avatar;
+}
+
 // As mesmas cores, com os nomes que o perfil guarda (migração 016).
 // A ordem casa com CORES acima.
 const NOMES_DAS_CORES = ["azul", "verde", "laranja", "vermelho", "roxo", "ciano", "rosa", "amarelo"];

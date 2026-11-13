@@ -846,9 +846,148 @@ describe("DELETE /api/quizzes/:id", () => {
     const { dados: catalogo } = await cliente.get("/api/quizzes");
     assert.equal(catalogo.quizzes.length, 1);
     assert.equal(catalogo.quizzes[0].autor, null);
+    assert.equal(catalogo.quizzes[0].autor_situacao, "desconhecido");
 
-    const { status } = await cliente.get(`/api/quizzes/${publicado.id}`);
+    const { status, dados } = await cliente.get(`/api/quizzes/${publicado.id}`);
     assert.equal(status, 200);
+    assert.equal(dados.quiz.autor_situacao, "desconhecido");
+  });
+});
+
+describe("perfil público: onde a pessoa mais pontuou", () => {
+  async function jogar(quizId, usuarioId, pontos, sala, vale = true) {
+    await pool.query(
+      `INSERT INTO resultados (quiz_id, sala, jogador_id, apelido, pontos, posicao, usuario_id, vale_ranking)
+       VALUES ($1, $2, 'j1', 'Dono', $3, 1, $4, $5)`,
+      [quizId, sala, pontos, usuarioId, vale]
+    );
+  }
+
+  it("lista os quizzes do catálogo pelo recorde, e esconde rascunho e partida que não valeu", async () => {
+    const { dados: eu } = await cliente.get("/api/usuarios/eu");
+    const id = eu.usuario.id;
+
+    const muito = await criarQuiz("Muito ponto");
+    const pouco = await criarQuiz("Pouco ponto");
+    const rascunho = await criarQuiz("Sala privada");
+    await publicar(muito);
+    await publicar(pouco);
+
+    await jogar(muito.id, id, 4000, "SALA1");
+    await jogar(muito.id, id, 5000, "SALA2");
+    await jogar(pouco.id, id, 4500, "SALA3");
+    await jogar(pouco.id, id, 4600, "SALA6");
+    await jogar(pouco.id, id, 4700, "SALA7");
+    await jogar(pouco.id, id, 9999, "SALA4", false);
+    await jogar(rascunho.id, id, 8000, "SALA5");
+
+    cliente.esquecerCookie();
+    const { status, dados } = await cliente.get(`/api/usuarios/${id}/jogados`);
+
+    assert.equal(status, 200);
+    assert.deepEqual(
+      dados.quizzes.map((q) => [q.titulo, q.pontos, q.partidas, q.recorde]),
+      // "Pouco ponto" soma mais (13.800), mas o recorde é menor: vem depois.
+      [["Muito ponto", 9000, 2, 5000], ["Pouco ponto", 13800, 3, 4700]]
+    );
+    assert.equal(dados.quizzes_diferentes, 2);
+    assert.equal(typeof dados.categoria_favorita, "string");
+  });
+
+  it("o histórico público só tem partida que valeu, em quiz do catálogo", async () => {
+    const { dados: eu } = await cliente.get("/api/usuarios/eu");
+    const id = eu.usuario.id;
+
+    const publicado = await criarQuiz("No ar");
+    const rascunho = await criarQuiz("Sala privada");
+    await publicar(publicado);
+
+    await jogar(publicado.id, id, 3000, "SALA1");
+    await jogar(publicado.id, id, 9999, "SALA2", false);
+    await jogar(rascunho.id, id, 8000, "SALA3");
+
+    cliente.esquecerCookie();
+    const { status, dados } = await cliente.get(`/api/usuarios/${id}/partidas`);
+
+    assert.equal(status, 200);
+    assert.deepEqual(dados.partidas.map((p) => [p.quiz, p.pontos]), [["No ar", 3000]]);
+  });
+
+  it("quem nunca jogou tem a lista vazia", async () => {
+    const { dados: eu } = await cliente.get("/api/usuarios/eu");
+    const { dados } = await cliente.get(`/api/usuarios/${eu.usuario.id}/jogados`);
+
+    assert.deepEqual(dados, { quizzes: [], categoria_favorita: null, quizzes_diferentes: 0 });
+  });
+});
+
+describe("publicar como anônimo", () => {
+  async function prepararAnonimo() {
+    const quiz = await criarQuiz("Sem assinatura");
+    await publicar(quiz);
+    const { dados: eu } = await cliente.get("/api/usuarios/eu");
+    const resposta = await cliente.patch("/api/usuarios/eu", { anonimo: true });
+    assert.equal(resposta.status, 200);
+    assert.equal(resposta.dados.usuario.anonimo, true);
+    return { quiz, donoId: eu.usuario.id };
+  }
+
+  it("para os outros, o quiz não tem nome, id, cor nem foto do autor", async () => {
+    const { quiz } = await prepararAnonimo();
+    cliente.esquecerCookie();
+
+    const { dados: catalogo } = await cliente.get("/api/quizzes");
+    const { dados: pagina } = await cliente.get(`/api/quizzes/${quiz.id}`);
+
+    for (const visto of [catalogo.quizzes[0], pagina.quiz]) {
+      assert.equal(visto.autor, null);
+      assert.equal(visto.autor_id, null);
+      assert.equal(visto.autor_cor, null);
+      assert.equal(visto.autor_foto, null);
+      assert.equal(visto.autor_situacao, "anonimo");
+    }
+  });
+
+  it("o próprio autor continua se vendo", async () => {
+    const { quiz, donoId } = await prepararAnonimo();
+
+    const { dados } = await cliente.get(`/api/quizzes/${quiz.id}`);
+    assert.equal(dados.quiz.autor_id, donoId);
+    assert.equal(dados.quiz.autor_situacao, null);
+  });
+
+  it("o perfil público não entrega o que a pessoa publicou", async () => {
+    const { donoId } = await prepararAnonimo();
+    await novaConta("Curiosa");
+
+    const { dados: lista } = await cliente.get(`/api/quizzes?autor=${donoId}`);
+    assert.equal(lista.quizzes.length, 0);
+
+    const { dados: perfil } = await cliente.get(`/api/usuarios/${donoId}`);
+    assert.equal(perfil.usuario.quizzes, 0);
+    assert.equal(perfil.usuario.quiz_destaque, null);
+    assert.equal(perfil.usuario.categoria_favorita, null);
+    assert.equal("anonimo" in perfil.usuario, false);
+  });
+
+  it("desligar devolve o nome ao catálogo", async () => {
+    const { donoId } = await prepararAnonimo();
+    await cliente.patch("/api/usuarios/eu", { anonimo: false });
+    cliente.esquecerCookie();
+
+    const { dados } = await cliente.get("/api/quizzes");
+    assert.equal(dados.quizzes[0].autor_id, donoId);
+    assert.equal(dados.quizzes[0].autor_situacao, null);
+  });
+
+  it("anônimo é sim ou não, e salvar o resto do perfil não o desliga", async () => {
+    await prepararAnonimo();
+
+    assert.equal((await cliente.patch("/api/usuarios/eu", { anonimo: "sim" })).status, 400);
+
+    await cliente.patch("/api/usuarios/eu", { cor: "roxo" });
+    const { dados } = await cliente.get("/api/usuarios/eu");
+    assert.equal(dados.usuario.anonimo, true);
   });
 });
 

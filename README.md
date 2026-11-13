@@ -5,7 +5,7 @@ entram pelo celular com um código, e as perguntas aparecem para
 todo mundo ao mesmo tempo — com cronômetro e placar atualizando em
 tempo real.
 
-`Node 22` · `PostgreSQL 16` · `Redis 7` · `WebSocket` · `Docker Compose` · `Playwright` · `225 testes`
+`Node 22` · `PostgreSQL 16` · `Redis 7` · `WebSocket` · `Docker Compose` · `Playwright` · `233 testes`
 
 ![testes](https://github.com/G-Satoo/quiz/actions/workflows/testes.yml/badge.svg)
 

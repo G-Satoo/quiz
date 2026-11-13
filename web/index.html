@@ -305,7 +305,7 @@
 
 import { criarConexao, pintarEstado } from "./conexao.js";
 import { artePorCategoria, coresDaCategoria } from "./capas.js";
-import { fundoDoPerfil, montarAvatar } from "./avatar.js";
+import { SEM_AUTOR, fundoDoPerfil, montarAvatar, montarAvatarSemRosto } from "./avatar.js";
 import { confirmarCopia } from "./confirmar.js";
 import { montarPodio } from "./podio.js";
 
@@ -441,9 +441,23 @@ function linhaDoAutor(quiz, classeExtra = "") {
   botao.type = "button";
   botao.className = "autor-card " + classeExtra;
 
+  // Sem autor para mostrar (anônimo, ou a conta foi apagada): a
+  // silhueta no lugar da foto, e nada para clicar — não há perfil.
   if (!quiz.autor) {
-    botao.hidden = true;
-    return botao;
+    const rotulo = SEM_AUTOR[quiz.autor_situacao] ?? SEM_AUTOR.desconhecido;
+    const semAutor = document.createElement("span");
+    semAutor.className = "autor-card sem-autor " + classeExtra;
+    semAutor.title = rotulo;
+    semAutor.append(montarAvatarSemRosto("avatar avatar-autor"));
+
+    if (classeExtra.includes("autor-destaque")) {
+      const nome = document.createElement("span");
+      nome.className = "nome-autor";
+      nome.textContent = rotulo;
+      semAutor.append(nome);
+    }
+
+    return semAutor;
   }
 
   const nome = quiz.meu ? "você" : quiz.autor;
@@ -1410,8 +1424,12 @@ async function desenharRanking() {
 const MEDALHAS = { 1: "ouro", 2: "prata", 3: "bronze" };
 
 function desenharJogador(jogador, posicao) {
-  const cartao = document.createElement("article");
+  // O cartão inteiro é um link para o perfil público da pessoa: o
+  // ranking só soma quem joga com conta, então sempre há um perfil.
+  const cartao = document.createElement("a");
   cartao.className = "card-jogador";
+  cartao.href = `perfil.html?id=${jogador.id}`;
+  cartao.setAttribute("aria-label", `Perfil de ${jogador.nome}, ${posicao}º lugar`);
 
   const selo = document.createElement("span");
   selo.className = "posicao-jogador " + (MEDALHAS[posicao] ?? "");

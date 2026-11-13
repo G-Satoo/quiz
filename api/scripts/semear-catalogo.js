@@ -8,16 +8,23 @@
 //   1. Apaga TODO quiz sem nenhuma pergunta ativa — de qualquer
 //      conta. Quiz assim não abre sala; no catálogo ele só
 //      ocupa espaço com um botão morto.
-//   2. Cria 30 quizzes (3 por categoria) na conta de
-//      demonstração, cada um com 10 perguntas (o mínimo exigido).
-//   3. Inventa um histórico de aberturas espalhado pelos últimos
-//      60 dias, para as fileiras "da semana" e "de hoje" terem o
-//      que mostrar.
+//   2. Cria os quizzes do catálogo, cada um com 10 perguntas (o
+//      mínimo exigido). Os AUTORES variam: a maioria é de contas
+//      de jogadores de demonstração e alguns ficam na conta demo
+//      — num site de verdade o catálogo é feito por muita gente,
+//      e com um autor só o perfil público e o "Criado por" não
+//      teriam o que mostrar.
+//   3. Inventa um histórico de aberturas (tabela ACESSOS, mais
+//      abaixo): uns quizzes são os mais acessados de sempre, e
+//      OUTROS estão em alta nesta semana e hoje — assim as
+//      fileiras "mais acessados" e "da semana" não se repetem.
 //   4. Inventa partidas jogadas (com apelidos e pontos) e as
-//      notas que esses jogadores deram, para "Jogadores do dia"
-//      e a nota do banner terem o que mostrar. Os jogadores
-//      ganham contas (jogador1@quiz.dev, jogador2@quiz.dev...),
-//      porque o ranking só conta quem joga com conta.
+//      notas que esses jogadores deram: uma parte hoje, uma parte
+//      nesta semana e o resto mais antigo, para o ranking de
+//      hoje, o da semana e o geral terem o que mostrar. Os
+//      jogadores ganham contas (jogador1@quiz.dev...), porque o
+//      ranking só conta quem joga com conta.
+//   5. Aplica as capas ilustradas de db/capas/.
 //
 // Os passos 3 e 4 são dado FALSO, e estão aqui só para
 // demonstração: essas seções existem para medir uso real, e num
@@ -25,8 +32,14 @@
 // banco com gente de verdade usando — os rankings passariam a
 // mentir.
 //
-// Pode rodar várias vezes: antes de criar, apaga os quizzes da
-// conta demo que tenham os mesmos títulos.
+// O CATÁLOGO NÃO É DE UMA CONTA
+// O que põe um quiz no catálogo é a situação 'publicado', não o
+// dono: a página inicial lista todo quiz publicado, de qualquer
+// autor (GET /api/quizzes). O autor é só o crédito. Esta lista
+// aqui é o catálogo INICIAL; os próximos entram pela moderação.
+//
+// Pode rodar várias vezes: antes de criar, apaga os quizzes das
+// contas de demonstração que tenham os mesmos títulos.
 // ============================================================
 
 import "dotenv/config";
@@ -574,6 +587,43 @@ const CATALOGO = [
   }
 ];
 
+// ---------- Acessos de demonstração ----------
+//
+// [antigos, nesta semana (antes de hoje), hoje] por título.
+//
+// Os de cima são os "mais acessados de todos os tempos": muito
+// acesso antigo e nenhum recente — e são os que têm capa
+// ilustrada, porque é a fileira do topo da página. Os de baixo
+// estão em alta AGORA, com pouco histórico. São grupos diferentes
+// de propósito: com os mesmos quizzes nas duas listas, "da semana"
+// só repetiria "de todos os tempos".
+//
+// Quem não está na tabela ganha uns poucos acessos antigos.
+const ACESSOS = {
+  "Segunda Guerra Mundial":   [144, 0, 0],
+  "Fórmula 1":                [125, 2, 1],
+  "Como a internet funciona": [114, 0, 0],
+  "Sistema Solar":            [100, 0, 0],
+  "Rock nacional":            [72, 0, 0],
+  "Química básica":           [68, 0, 0],
+  "Brasil Império":           [67, 0, 0],
+  "Culinária brasileira":     [38, 0, 0],
+  "Corpo humano":             [36, 0, 0],
+  "Egito Antigo":             [24, 0, 0],
+  "The Beatles":              [24, 0, 0],
+
+  "Pokémon":           [6, 10, 4],
+  "Copa do Mundo":     [5, 8, 4],
+  "Minecraft":         [4, 8, 3],
+  "One Piece":         [7, 8, 2],
+  "Super Mario":       [5, 7, 2],
+  "Reino animal":      [3, 6, 2],
+  "Star Wars":         [9, 5, 2],
+  "Capitais do mundo": [6, 5, 1],
+  "Naruto":            [8, 4, 1],
+  "Harry Potter":      [12, 3, 1]
+};
+
 // ---------- Sorteio reprodutível ----------
 //
 // Math.random daria um catálogo diferente a cada execução. Com
@@ -603,6 +653,19 @@ const APELIDOS = [
 ];
 const entre = (min, max) => min + Math.floor(sortear() * (max - min + 1));
 
+// Quantas contas de jogador também são autoras de quiz.
+const AUTORES = 12;
+
+// O autor sai do TÍTULO (uma soma das letras), não do sorteio:
+// rodar de novo dá o mesmo autor para o mesmo quiz, mesmo que a
+// lista mude de ordem. Posição 0 é a conta demo; as outras, os
+// primeiros jogadores.
+function autorDe(titulo, demoId, contas) {
+  const soma = [...titulo].reduce((s, letra) => s + letra.codePointAt(0), 0);
+  const posicao = soma % (AUTORES + 1);
+  return posicao === 0 ? demoId : contas[posicao - 1];
+}
+
 function embaralhar(lista) {
   const copia = [...lista];
   for (let i = copia.length - 1; i > 0; i--) {
@@ -611,6 +674,19 @@ function embaralhar(lista) {
   }
   return copia;
 }
+
+// Transforma ("hoje" | "semana" | "antigo", fração de 0 a 1) numa
+// data, dentro do banco:
+//   hoje    entre a meia-noite e agora;
+//   semana  entre o começo da semana e a meia-noite de hoje (na
+//           segunda-feira esse intervalo é vazio, e cai em hoje);
+//   antigo  de 8 a 60 dias atrás — sempre antes desta semana.
+const QUANDO = `
+  CASE x.quando
+    WHEN 'hoje'   THEN inicio_do_dia() + (now() - inicio_do_dia()) * x.f
+    WHEN 'semana' THEN inicio_da_semana() + (inicio_do_dia() - inicio_da_semana()) * x.f
+    ELSE now() - make_interval(days => 8 + floor(x.f * 52)::int)
+  END`;
 
 async function semear() {
   const cliente = await pool.connect();
@@ -665,8 +741,8 @@ async function semear() {
     // Rodar de novo não duplica: some a versão anterior de cada
     // quiz deste catálogo antes de criar a nova.
     await cliente.query(
-      "DELETE FROM quizzes WHERE usuario_id = $1 AND titulo = ANY($2)",
-      [usuarioId, CATALOGO.map((q) => q.titulo)]
+      "DELETE FROM quizzes WHERE usuario_id = ANY($1) AND titulo = ANY($2)",
+      [[usuarioId, ...contas], CATALOGO.map((q) => q.titulo)]
     );
 
     // 2. Os quizzes. A ordem de criação também é embaralhada:
@@ -680,7 +756,7 @@ async function semear() {
         `INSERT INTO quizzes (usuario_id, titulo, descricao, categoria, tema, etiquetas,
                               situacao, moderacao_por, moderacao_em)
          VALUES ($1, $2, $3, $4, $2, $5, 'publicado', 'semente', now()) RETURNING id`,
-        [usuarioId, quiz.titulo, quiz.descricao, quiz.categoria, quiz.etiquetas]
+        [autorDe(quiz.titulo, usuarioId, contas), quiz.titulo, quiz.descricao, quiz.categoria, quiz.etiquetas]
       );
       const quizId = criados[0].id;
 
@@ -704,40 +780,27 @@ async function semear() {
         }
       }
 
-      // 3. Histórico inventado. Poucos quizzes muito acessados e
-      // uma cauda longa de pouco acessados, que é o formato que
-      // popularidade costuma ter — com todos parecidos, as
-      // fileiras ficariam iguais entre si.
-      const total = Math.round(3 + 140 * sortear() ** 3);
-      const horas = [];
+      // 3. Histórico inventado (tabela ACESSOS, lá em cima). Cada
+      // acesso vira uma linha com QUANDO ("antigo", "semana" ou
+      // "hoje") e uma fração sorteada, e é o banco que transforma
+      // isso em data — as funções inicio_do_dia() e
+      // inicio_da_semana() são as mesmas que as fileiras usam para
+      // contar, então o dado cai sempre do lado certo da linha.
+      const [antigos, naSemana, hojeAcessos] = ACESSOS[quiz.titulo] ?? [entre(3, 18), 0, 0];
+      const acessos = [
+        ...Array.from({ length: antigos }, () => ({ quando: "antigo", f: sortear() })),
+        ...Array.from({ length: naSemana }, () => ({ quando: "semana", f: sortear() })),
+        ...Array.from({ length: hojeAcessos }, () => ({ quando: "hoje", f: sortear() }))
+      ];
 
-      // Cada quiz tem o seu MOMENTO: alguns estão em alta agora
-      // (quase todo acesso é recente), outros são clássicos
-      // antigos (quase nada esta semana). Se todos tivessem o
-      // mesmo perfil no tempo, "da semana" e "de hoje" sairiam
-      // na mesma ordem que "de todos os tempos" — três fileiras
-      // dizendo a mesma coisa.
-      const emAlta = sortear() ** 2;
-      const hoje = emAlta * 0.25;
+      await cliente.query(
+        `INSERT INTO aberturas (quiz_id, ocorrido_em)
+         SELECT $1, ${QUANDO}
+           FROM jsonb_to_recordset($2::jsonb) AS x(quando text, f float8)`,
+        [quizId, JSON.stringify(acessos)]
+      );
 
-      for (let i = 0; i < total; i++) {
-        const faixa = sortear();
-        const atras = faixa < hoje ? sortear() * 12
-                    : faixa < emAlta ? 24 + sortear() * 24 * 6
-                    : 24 * 7 + sortear() * 24 * 53;
-        horas.push(atras);
-      }
-
-      if (horas.length > 0) {
-        await cliente.query(
-          `INSERT INTO aberturas (quiz_id, ocorrido_em)
-           SELECT $1, now() - make_interval(secs => h * 3600)
-             FROM unnest($2::float8[]) AS h`,
-          [quizId, horas]
-        );
-      }
-
-      await cliente.query("UPDATE quizzes SET partidas = $2 WHERE id = $1", [quizId, total]);
+      await cliente.query("UPDATE quizzes SET partidas = $2 WHERE id = $1", [quizId, acessos.length]);
 
       // 4. Partidas jogadas e notas. Cada quiz tem uma QUALIDADE
       // sorteada que puxa as notas dele para cima ou para baixo
@@ -752,10 +815,11 @@ async function semear() {
         const jogadorId = `demo-${quizId}-${i}`;
         const sala = `DEMO${quizId}`;
 
-        // Parte de hoje (alimenta "Jogadores do dia"), o resto
-        // espalhado pelos últimos 60 dias. "Hoje" é uma fração
-        // do tempo desde a meia-noite, para nunca cair ontem.
-        const hoje = sortear() < 0.3;
+        // Um quarto das partidas é de hoje, um quarto desta
+        // semana e o resto mais antigo: assim o ranking de hoje, o
+        // da semana e o geral saem diferentes, e nenhum vazio.
+        const sorte = sortear();
+        const quando = sorte < 0.25 ? "hoje" : sorte < 0.5 ? "semana" : "antigo";
 
         const quem = entre(0, APELIDOS.length - 1);
         const acertos = entre(2, 10);
@@ -774,8 +838,8 @@ async function semear() {
           pontos: Array.from({ length: acertos }, () => pontosDoAcerto(20, entre(1000, 18000)))
             .reduce((a, b) => a + b, 0),
           posicao: 1,
-          hoje,
-          fracao: sortear()
+          quando,
+          f: sortear()
         });
 
         // Sete em cada dez avaliam.
@@ -788,13 +852,10 @@ async function semear() {
       await cliente.query(
         `INSERT INTO resultados (quiz_id, sala, jogador_id, apelido, pontos, posicao, usuario_id, terminado_em)
          SELECT $1, x.sala, x.jogador_id, x.apelido, x.pontos, x.posicao, x.usuario_id,
-                CASE WHEN x.hoje
-                     THEN date_trunc('day', now()) + (now() - date_trunc('day', now())) * x.fracao
-                     ELSE now() - make_interval(days => 1 + floor(x.fracao * 59)::int)
-                END
+                ${QUANDO}
            FROM jsonb_to_recordset($2::jsonb)
              AS x(sala text, jogador_id text, apelido text, pontos int,
-                  posicao int, usuario_id int, hoje bool, fracao float8)`,
+                  posicao int, usuario_id int, quando text, f float8)`,
         [quizId, JSON.stringify(resultados)]
       );
 
@@ -815,7 +876,8 @@ async function semear() {
 
     console.log(`${capas} capa(s) ilustrada(s) aplicada(s).`);
     console.log(`Removidos ${removidos} quiz(zes) sem pergunta.`);
-    console.log(`Criados ${CATALOGO.length} quizzes na conta ${EMAIL} (senha: ${SENHA}).`);
+    console.log(`Criados ${CATALOGO.length} quizzes, de autores variados.`);
+    console.log(`Conta de demonstração: ${EMAIL} (senha: ${SENHA}).`);
   } catch (erro) {
     await cliente.query("ROLLBACK");
     throw erro;

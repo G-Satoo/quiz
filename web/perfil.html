@@ -52,6 +52,16 @@
       <label>Cor do perfil</label>
       <div class="cores-perfil" id="cores-perfil" role="radiogroup" aria-label="Cor do perfil"></div>
 
+      <!-- Publicar como anônimo: os quizzes continuam no catálogo,
+           mas sem nome, foto nem link para este perfil. -->
+      <label class="opcao-anonimo">
+        <input type="checkbox" id="campo-anonimo">
+        <span>
+          <strong>Aparecer como anônimo nos meus quizzes</strong>
+          <small>O catálogo mostra “Anônimo” no lugar do seu nome e da sua foto.</small>
+        </span>
+      </label>
+
       <div id="erro-perfil" class="erro escondido"></div>
       <button type="submit" class="largo" id="botao-salvar-perfil">Salvar</button>
     </form>
@@ -97,9 +107,6 @@
         <button type="button" class="discreto escondido" id="botao-editar-perfil">Editar perfil</button>
       </div>
 
-      <!-- Só no perfil público: o quiz mais acessado e onde a pessoa mais cria. -->
-      <div class="extras-perfil escondido" id="extras-perfil"></div>
-
       <!--
         Números do que a pessoa fez, não de quem ela é. São as
         mesmas tabelas que alimentam o ranking: o perfil é o
@@ -108,9 +115,21 @@
       <div class="numeros-perfil" id="numeros">
         <div class="numero-perfil"><strong id="n-partidas">0</strong><span>partidas</span></div>
         <div class="numero-perfil"><strong id="n-vitorias">0</strong><span>vitórias</span></div>
-        <div class="numero-perfil"><strong id="n-pontos">0</strong><span>pontos no total</span></div>
-        <div class="numero-perfil"><strong id="n-recorde">0</strong><span>recorde numa partida</span></div>
+        <div class="numero-perfil"><strong id="n-pontos">0</strong><span>pontos totais</span></div>
+        <div class="numero-perfil"><strong id="n-recorde">0</strong><span>melhor partida</span></div>
         <div class="numero-perfil"><strong id="n-quizzes">0</strong><span>quizzes criados</span></div>
+      </div>
+
+      <!-- Só no perfil público de quem publicou: o quiz mais acessado
+           (com a capa) e sobre o que a pessoa cria (uma barra por
+           categoria). -->
+      <div class="destaques-autor escondido" id="destaques-autor"></div>
+
+      <!-- O lado jogador: em quais quizzes a pessoa mais pontuou.
+           No seu perfil e no dos outros. -->
+      <div id="secao-jogados" class="secao-jogados escondido">
+        <div class="topo-secao-perfil"><h2>Recordes pessoais</h2></div>
+        <div class="grade-recomendados" id="jogados"></div>
       </div>
 
       <div class="topo-secao-perfil">
@@ -129,9 +148,11 @@
       <div class="catalogo meus-quizzes" id="meus"></div>
       <div id="meus-vazio" class="vazio escondido">Você ainda não criou nenhum quiz.</div>
 
-      <!-- Só no seu perfil: as últimas partidas jogadas logado. -->
+      <!-- As últimas partidas. No seu perfil, todas as que você jogou
+           logado; no dos outros, só as que valeram ranking em quiz
+           do catálogo. -->
       <div id="secao-partidas" class="escondido">
-        <div class="topo-secao-perfil"><h2>Minhas partidas</h2></div>
+        <div class="topo-secao-perfil"><h2 id="titulo-partidas">Minhas partidas</h2></div>
         <ul class="lista-partidas" id="partidas"></ul>
       </div>
 
@@ -158,7 +179,7 @@
 
 import { CORES_DO_PERFIL, fundoDoPerfil, montarAvatar } from "./avatar.js";
 import { confirmarCopia } from "./confirmar.js";
-import { artePorCategoria } from "./capas.js";
+import { artePorCategoria, coresDaCategoria } from "./capas.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -216,13 +237,28 @@ async function mostrarPublico() {
     $("desde").textContent = "no quiz desde " +
       new Date(usuario.criado_em).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
 
+    // Os números de AUTOR só fazem sentido para quem publicou algo:
+    // "0 quizzes" e "nota média —" em quem só joga é ruído. (A nota
+    // média é a das avaliações que os jogadores deram aos quizzes
+    // dela; vitória é terminar uma partida em 1º lugar.)
+    const autor = usuario.quizzes > 0;
     const numeros = [
-      [numero(usuario.quizzes), "quizzes no catálogo"],
-      [numero(usuario.acessos), "acessos nos quizzes"],
-      [usuario.nota === null ? "—" : `★ ${usuario.nota.toFixed(1).replace(".", ",")}`, "nota média"],
+      ...(autor ? [
+        [numero(usuario.quizzes), "quizzes no catálogo"],
+        ...(usuario.nota === null ? [] : [[`★ ${usuario.nota.toFixed(1).replace(".", ",")}`, "nota dos quizzes"]])
+      ] : []),
       [numero(usuario.partidas), "partidas jogadas"],
-      [numero(usuario.pontos), "pontos"],
-      [numero(usuario.vitorias), "vitórias"]
+      // No lugar de "vitórias": o total repetia o que "de vitórias"
+      // (a porcentagem, logo adiante) já diz melhor.
+      [numero(usuario.quizzes_jogados), usuario.quizzes_jogados === 1 ? "quiz diferente" : "quizzes diferentes"],
+      [numero(usuario.pontos), "pontos totais"],
+      // Três contas feitas com os números acima — só para quem já
+      // jogou: dividir por zero partidas não diz nada.
+      ...(usuario.partidas > 0 ? [
+        [numero(usuario.recorde), "melhor partida"],
+        [numero(Math.round(usuario.pontos / usuario.partidas)), "média por partida"],
+        [`${Math.round((usuario.vitorias / usuario.partidas) * 100)}%`, "de vitórias"]
+      ] : [])
     ];
     $("numeros").replaceChildren(...numeros.map(([valor, rotulo]) => {
       const caixa = document.createElement("div");
@@ -235,37 +271,310 @@ async function mostrarPublico() {
       return caixa;
     }));
 
-    const extras = $("extras-perfil");
-    if (usuario.quiz_destaque) {
-      const linha = document.createElement("p");
-      linha.append("Mais acessado: ");
-      const link = document.createElement("a");
-      link.href = `quiz.html?id=${usuario.quiz_destaque.id}`;
-      link.textContent = usuario.quiz_destaque.titulo;
-      linha.append(link, ` · ${numero(usuario.quiz_destaque.acessos)} acessos`);
-      extras.append(linha);
-    }
-    if (usuario.categoria_favorita) {
-      const linha = document.createElement("p");
-      linha.textContent = `Cria mais sobre: ${CATEGORIAS[usuario.categoria_favorita] ?? usuario.categoria_favorita}`;
-      extras.append(linha);
-    }
-    extras.classList.toggle("escondido", extras.childElementCount === 0);
+    desenharDestaques(quizzes);
 
     $("titulo-lista").textContent = `Quizzes de ${usuario.nome}`;
     for (const id of ["link-novo", "explicacao-lista", "rodape-perfil", "link-moderacao"]) {
       $(id).classList.add("escondido");
     }
 
-    $("meus-vazio").textContent = "Nenhum quiz no catálogo ainda.";
-    $("meus-vazio").classList.toggle("escondido", quizzes.length > 0);
+    // Sem quiz publicado, a seção inteira some (título incluído).
+    $("titulo-lista").parentElement.classList.toggle("escondido", quizzes.length === 0);
     for (const quiz of quizzes) $("meus").append(desenharMeu(quiz, { publico: true }));
 
+    // Espera os recordes antes de mostrar: a categoria que a pessoa
+    // mais joga entra como PRIMEIRO quadrado, e chegar depois faria
+    // os outros pularem de lugar na frente de quem olha.
+    await carregarJogados(idPublico, { naFrente: true });
+    arrumarNumeros();
     $("perfil").classList.remove("escondido");
+    carregarPartidas(idPublico);
   } catch (erro) {
     $("erro").textContent = erro.message;
     $("erro").classList.remove("escondido");
   }
+}
+
+// ----- Destaques de autor (perfil público) -----
+
+/**
+ * Dois painéis, feitos com a lista de quizzes que a página já
+ * carregou (nada de rota nova):
+ *
+ *   - o quiz mais acessado da pessoa, com a capa, e um clique até ele;
+ *   - sobre o que ela cria: uma barra por categoria, na cor da
+ *     categoria, do tamanho da fatia de quizzes que ela tem ali.
+ *
+ * Sem quiz publicado (ou publicando como anônima, quando a lista
+ * vem vazia), nada aparece.
+ */
+function desenharDestaques(quizzes) {
+  if (quizzes.length === 0) return;
+
+  const caixa = $("destaques-autor");
+  caixa.append(painelMaisAcessado(quizzes), painelCategorias(quizzes));
+  caixa.classList.remove("escondido");
+}
+
+function rotuloDoPainel(texto) {
+  const rotulo = document.createElement("span");
+  rotulo.className = "rotulo-secao";
+  rotulo.textContent = texto;
+  return rotulo;
+}
+
+function painelMaisAcessado(quizzes) {
+  // Empate fica com o mais antigo: a resposta não muda a cada visita.
+  const quiz = [...quizzes].sort((a, b) => b.partidas - a.partidas || a.id - b.id)[0];
+
+  const painel = document.createElement("a");
+  painel.className = "painel-destaque painel-quiz";
+  painel.href = `quiz.html?id=${quiz.id}`;
+
+  const capa = document.createElement("div");
+  capa.className = "capa";
+  if (quiz.imagem_url) {
+    const img = document.createElement("img");
+    img.className = "foto-capa";
+    img.src = quiz.imagem_url;
+    img.alt = "";
+    capa.append(img);
+  } else {
+    capa.insertAdjacentHTML("beforeend", artePorCategoria(quiz.categoria));
+  }
+
+  const texto = document.createElement("div");
+  texto.className = "texto-painel";
+
+  const titulo = document.createElement("strong");
+  titulo.className = "titulo-painel";
+  titulo.textContent = quiz.titulo; // texto, nunca innerHTML
+
+  const detalhes = document.createElement("div");
+  detalhes.className = "detalhes-painel";
+  detalhes.textContent =
+    (CATEGORIAS[quiz.categoria] ?? quiz.categoria) +
+    ` · ${quiz.perguntas} perguntas` +
+    (quiz.avaliacoes > 0 ? ` · ★ ${quiz.nota.toFixed(1).replace(".", ",")}` : "");
+
+  // Aqui o número de acessos fica: é ele que explica o "mais
+  // popular". Nos outros lugares do perfil público ele não aparece.
+  //
+  // Um selo com o ícone de pessoa (o mesmo do catálogo) e o número
+  // grande; embaixo, uma barra com a FATIA que este quiz representa
+  // em todos os acessos aos quizzes da pessoa — "144" sozinho não
+  // diz se é muito; "75% dos acessos dela" diz.
+  const [escura, clara] = coresDaCategoria(quiz.categoria);
+
+  const acessos = document.createElement("div");
+  acessos.className = "acessos-painel";
+
+  const icone = document.createElement("span");
+  icone.className = "icone-acessos";
+  icone.style.background = `linear-gradient(135deg, ${escura}, ${clara})`;
+  icone.innerHTML =
+    '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="8" r="4"/>' +
+    '<path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7z"/></svg>';
+
+  const conta = document.createElement("div");
+  conta.className = "conta-acessos";
+  const quantos = document.createElement("strong");
+  quantos.textContent = numero(quiz.partidas);
+  const legenda = document.createElement("span");
+  legenda.textContent = quiz.partidas === 1 ? "acesso" : "acessos";
+  conta.append(quantos, legenda);
+  acessos.append(icone, conta);
+
+  const total = quizzes.reduce((soma, q) => soma + q.partidas, 0);
+  if (quizzes.length > 1 && total > 0) {
+    const porcento = Math.round((quiz.partidas / total) * 100);
+
+    const fatia = document.createElement("div");
+    fatia.className = "fatia-acessos";
+    const trilho = document.createElement("span");
+    trilho.className = "trilho-barra";
+    const cheio = document.createElement("span");
+    cheio.className = "enchimento-barra";
+    cheio.style.width = `${porcento}%`;
+    cheio.style.background = `linear-gradient(90deg, ${escura}, ${clara})`;
+    trilho.append(cheio);
+    const frase = document.createElement("small");
+    frase.textContent = `${porcento}% dos acessos aos quizzes que criou`;
+    fatia.append(trilho, frase);
+    acessos.append(fatia);
+  }
+
+  texto.append(rotuloDoPainel("Quiz mais popular que criou"), titulo, acessos, detalhes);
+  painel.append(capa, texto);
+  return painel;
+}
+
+function painelCategorias(quizzes) {
+  const contagem = new Map();
+  for (const quiz of quizzes) contagem.set(quiz.categoria, (contagem.get(quiz.categoria) ?? 0) + 1);
+
+  // Da que tem mais para a que tem menos; empate, ordem alfabética.
+  const ordem = [...contagem].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const maior = ordem[0][1];
+
+  const painel = document.createElement("div");
+  painel.className = "painel-destaque painel-categorias";
+
+  const favorita = document.createElement("strong");
+  favorita.className = "titulo-painel";
+  // Com empate no topo não há "a" favorita: dizer uma seria sorteio.
+  const empate = ordem.length > 1 && ordem[1][1] === maior;
+  favorita.textContent = empate
+    ? `${ordem.length} categorias`
+    : (CATEGORIAS[ordem[0][0]] ?? ordem[0][0]);
+
+  const lista = document.createElement("ul");
+  lista.className = "barras-categoria";
+
+  // Cinco linhas bastam: depois disso é uma cauda de "1 quiz".
+  for (const [categoria, quantos] of ordem.slice(0, 5)) {
+    const [escura, clara] = coresDaCategoria(categoria);
+
+    const linha = document.createElement("li");
+
+    const nome = document.createElement("span");
+    nome.className = "nome-barra";
+    nome.textContent = CATEGORIAS[categoria] ?? categoria;
+
+    const trilho = document.createElement("span");
+    trilho.className = "trilho-barra";
+    const barra = document.createElement("span");
+    barra.className = "enchimento-barra";
+    barra.style.width = `${Math.round((quantos / maior) * 100)}%`;
+    barra.style.background = `linear-gradient(90deg, ${escura}, ${clara})`;
+    trilho.append(barra);
+
+    const valor = document.createElement("span");
+    valor.className = "valor-barra";
+    valor.textContent = quantos;
+
+    linha.append(nome, trilho, valor);
+    lista.append(linha);
+  }
+
+  painel.append(rotuloDoPainel(empate ? "Cria sobre" : "Cria mais sobre"), favorita, lista);
+
+  if (ordem.length > 5) {
+    const resto = document.createElement("div");
+    resto.className = "detalhes-painel";
+    resto.textContent = `e mais ${ordem.length - 5} categoria${ordem.length - 5 === 1 ? "" : "s"}`;
+    painel.append(resto);
+  }
+
+  return painel;
+}
+
+// ----- Onde mais pontuou (no seu perfil e no dos outros) -----
+
+/**
+ * O recorde pessoal em cada quiz (a melhor partida, não a soma),
+ * com a capa, e a categoria que a pessoa mais joga — essa vai para
+ * os números lá de cima. Sem partida nenhuma, nada aparece — e se
+ * a rota falhar também não: é um extra do perfil.
+ */
+async function carregarJogados(id, { naFrente = false } = {}) {
+  try {
+    const { quizzes, categoria_favorita: categoria } =
+      await pedir("GET", `/api/usuarios/${id}/jogados`);
+    if (quizzes.length === 0) return;
+
+    const favorita = numeroDoPerfil(CATEGORIAS[categoria] ?? categoria, "mais joga", "numero-texto");
+    if (naFrente) $("numeros").prepend(favorita);
+    else $("numeros").append(favorita);
+    arrumarNumeros();
+
+    for (const quiz of quizzes) $("jogados").append(desenharJogado(quiz));
+    $("secao-jogados").classList.remove("escondido");
+  } catch {
+    // segue sem a seção
+  }
+}
+
+/**
+ * Fileiras cheias nos números do perfil.
+ *
+ * A quantidade de cartões muda de pessoa para pessoa (quem publica
+ * tem os de autor, quem joga tem os de jogador), e com colunas fixas
+ * sobrava um buraco no fim. Aqui se escolhe quantas colunas deixam
+ * a última fileira mais cheia — e o que faltar, os cartões dela
+ * esticam para completar (ver .numeros-perfil.arrumado no CSS).
+ */
+function arrumarNumeros() {
+  const caixa = $("numeros");
+  const n = caixa.childElementCount;
+  let colunas = n;
+
+  if (n > 5) {
+    let melhor = Infinity;
+    for (const c of [5, 4, 3]) {
+      const sobra = (c - (n % c)) % c;
+      const nota = sobra + Math.ceil(n / c);
+      if (nota < melhor) { melhor = nota; colunas = c; }
+    }
+  }
+
+  caixa.style.setProperty("--colunas", colunas);
+  caixa.classList.add("arrumado");
+}
+
+function numeroDoPerfil(valor, rotulo, classe = "") {
+  const caixa = document.createElement("div");
+  caixa.className = ("numero-perfil " + classe).trim();
+  const forte = document.createElement("strong");
+  forte.textContent = valor;
+  const legenda = document.createElement("span");
+  legenda.textContent = rotulo;
+  caixa.append(forte, legenda);
+  return caixa;
+}
+
+function desenharJogado(quiz) {
+  const cartao = document.createElement("a");
+  cartao.className = "card-quiz card-recomendado";
+  cartao.href = `quiz.html?id=${quiz.id}`;
+
+  const capa = document.createElement("div");
+  capa.className = "capa";
+
+  if (quiz.imagem_url) {
+    const img = document.createElement("img");
+    img.className = "foto-capa";
+    img.src = quiz.imagem_url;
+    img.alt = "";
+    img.loading = "lazy";
+    capa.append(img);
+  } else {
+    capa.insertAdjacentHTML("beforeend", artePorCategoria(quiz.categoria));
+  }
+
+  const selo = document.createElement("span");
+  selo.className = "selo-categoria";
+  selo.textContent = quiz.etiquetas?.[0] ?? CATEGORIAS[quiz.categoria] ?? quiz.categoria;
+  const selos = document.createElement("div");
+  selos.className = "selos-topo";
+  selos.style.justifyContent = "flex-end";
+  selos.append(selo);
+  capa.append(selos);
+
+  const titulo = document.createElement("h3");
+  titulo.className = "titulo-card";
+  titulo.textContent = quiz.titulo; // texto, nunca innerHTML
+  titulo.title = quiz.titulo;
+
+  const meta = document.createElement("div");
+  meta.className = "meta-card";
+  // Só o recorde cabe numa linha do card; quantas partidas foram
+  // fica na dica do mouse.
+  meta.textContent = `recorde ${numero(quiz.recorde)} pts`;
+  meta.title = `${quiz.partidas} partida${quiz.partidas === 1 ? "" : "s"} neste quiz`;
+
+  cartao.append(capa, titulo, meta);
+  return cartao;
 }
 
 // ----- Foto de perfil (só no seu) -----
@@ -392,6 +701,7 @@ function contarBio() {
 $("botao-editar-perfil").addEventListener("click", () => {
   $("campo-nome").value = perfilAtual.nome;
   $("campo-bio").value = perfilAtual.bio ?? "";
+  $("campo-anonimo").checked = Boolean(perfilAtual.anonimo);
   corEscolhida = perfilAtual.cor;
   contarBio();
   desenharCores();
@@ -421,7 +731,8 @@ $("formulario-perfil").addEventListener("submit", async (evento) => {
       body: JSON.stringify({
         nome: $("campo-nome").value,
         bio: $("campo-bio").value,
-        cor: corEscolhida
+        cor: corEscolhida,
+        anonimo: $("campo-anonimo").checked
       })
     });
     const dados = await resposta.json().catch(() => null);
@@ -520,7 +831,7 @@ else try {
   avatarAtual = montarAvatar(perfil.nome, "avatar avatar-perfil", perfil.foto, perfil.cor);
   $("lugar-avatar").replaceWith(avatarAtual);
   nomeDoPerfil = perfil.nome;
-  perfilAtual = { nome: perfil.nome, bio: perfil.bio, cor: perfil.cor, banner: perfil.banner, foto: perfil.foto };
+  perfilAtual = { nome: perfil.nome, bio: perfil.bio, cor: perfil.cor, banner: perfil.banner, foto: perfil.foto, anonimo: perfil.anonimo };
   desenharTopo(perfilAtual);
   $("botao-editar-perfil").classList.remove("escondido");
   $("botao-tirar-foto").classList.toggle("escondido", !perfil.foto);
@@ -546,6 +857,8 @@ else try {
   // Depois de a página aparecer: o histórico é um extra, e não deve
   // segurar o resto se demorar ou falhar.
   carregarPartidas();
+  arrumarNumeros();
+  carregarJogados(perfil.id);
 } catch (erro) {
   if (erro.message !== "sem sessão") {
     $("erro").textContent = erro.message;
@@ -597,7 +910,9 @@ function desenharMeu(quiz, { publico = false } = {}) {
   const meta = document.createElement("div");
   meta.className = "meta-card";
   meta.textContent =
-    `${quiz.perguntas} pergunta${quiz.perguntas === 1 ? "" : "s"} · ${numero(quiz.partidas)} acessos` +
+    `${quiz.perguntas} pergunta${quiz.perguntas === 1 ? "" : "s"}` +
+    // Quantos acessos o quiz teve interessa ao dono, não a quem visita.
+    (publico ? "" : ` · ${numero(quiz.partidas)} acessos`) +
     (quiz.avaliacoes > 0 ? ` · ★ ${quiz.nota.toFixed(1).replace(".", ",")}` : "");
 
   const acoes = document.createElement("div");
@@ -662,10 +977,15 @@ function desenharMeu(quiz, { publico = false } = {}) {
 
 // ----- Minhas partidas -----
 
-async function carregarPartidas() {
+async function carregarPartidas(idDeOutro = null) {
   try {
-    const { partidas } = await pedir("GET", "/api/usuarios/eu/partidas");
+    const { partidas } = await pedir(
+      "GET",
+      idDeOutro ? `/api/usuarios/${idDeOutro}/partidas` : "/api/usuarios/eu/partidas"
+    );
     if (partidas.length === 0) return;
+
+    if (idDeOutro) $("titulo-partidas").textContent = "Últimas partidas";
 
     const lista = $("partidas");
 

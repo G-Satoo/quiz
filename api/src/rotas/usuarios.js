@@ -68,7 +68,7 @@ router.post(
 router.get("/eu", exigirLogin, async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      `SELECT u.id, u.nome, u.email, u.criado_em, u.admin, u.bio, u.cor,
+      `SELECT u.id, u.nome, u.email, u.criado_em, u.admin, u.bio, u.cor, u.anonimo,
               (SELECT '/api/usuarios/' || b.usuario_id || '/banner?v=' || floor(extract(epoch FROM b.enviada_em))::bigint
                  FROM banners_perfil b WHERE b.usuario_id = u.id) AS banner,
               (SELECT '/api/usuarios/' || f.usuario_id || '/foto?v=' || floor(extract(epoch FROM f.enviada_em))::bigint
@@ -100,7 +100,7 @@ router.get("/eu", exigirLogin, async (req, res, next) => {
 router.get("/eu/perfil", exigirLogin, async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      `SELECT u.id, u.nome, u.email, u.criado_em, u.admin, u.bio, u.cor,
+      `SELECT u.id, u.nome, u.email, u.criado_em, u.admin, u.bio, u.cor, u.anonimo,
               (SELECT '/api/usuarios/' || b.usuario_id || '/banner?v=' || floor(extract(epoch FROM b.enviada_em))::bigint
                  FROM banners_perfil b WHERE b.usuario_id = u.id) AS banner,
               (SELECT '/api/usuarios/' || f.usuario_id || '/foto?v=' || floor(extract(epoch FROM f.enviada_em))::bigint
@@ -137,6 +137,12 @@ router.get("/eu/perfil", exigirLogin, async (req, res, next) => {
  * ranking. Nada de e-mail, nada de rascunho ou quiz recusado — isso
  * é do perfil particular (/eu/perfil), que exige ser a pessoa.
  *
+ * Quem publica como anônimo (migração 023) tem um perfil sem a
+ * parte de AUTOR — quantos quizzes, acessos, nota, o quiz em
+ * destaque, a categoria favorita. Sem isso, bastaria chegar ao
+ * perfil pelo ranking para ver o que a pessoa publicou. A parte de
+ * jogadora continua. A própria pessoa vê tudo.
+ *
  * Vem depois das rotas /eu de propósito: o Express testa na ordem,
  * e "/:id" na frente engoliria "/eu" como se fosse um id.
  */
@@ -149,15 +155,16 @@ const CORES_PERFIL = ["azul", "verde", "laranja", "vermelho", "roxo", "ciano", "
 
 /**
  * PATCH /api/usuarios/eu
- * body: { nome?, bio?, cor? }
+ * body: { nome?, bio?, cor?, anonimo? }
  *
  * Nome e bio são públicos (catálogo, ranking, perfil): se mudaram,
  * passam pela IA antes de gravar. A cor não precisa — é uma das do
- * site, escolhida de uma lista fechada.
+ * site, escolhida de uma lista fechada. `anonimo` (publicar sem
+ * aparecer como autor, migração 023) também não: é um sim ou não.
  */
 router.patch("/eu", exigirLogin, async (req, res, next) => {
   try {
-    const { nome, bio, cor } = req.body ?? {};
+    const { nome, bio, cor, anonimo } = req.body ?? {};
 
     if (nome !== undefined) {
       const erro = validarNome(nome);
@@ -168,6 +175,9 @@ router.patch("/eu", exigirLogin, async (req, res, next) => {
     }
     if (cor !== undefined && cor !== null && !CORES_PERFIL.includes(cor)) {
       return res.status(400).json({ erro: "Cor inválida" });
+    }
+    if (anonimo !== undefined && typeof anonimo !== "boolean") {
+      return res.status(400).json({ erro: "Anônimo é sim ou não" });
     }
 
     const { rows: atuais } = await pool.query("SELECT nome, bio FROM usuarios WHERE id = $1", [req.usuarioId]);
@@ -194,10 +204,11 @@ router.patch("/eu", exigirLogin, async (req, res, next) => {
 
     const { rows } = await pool.query(
       `UPDATE usuarios
-          SET nome = $2, bio = $3, cor = CASE WHEN $4::bool THEN $5 ELSE cor END
+          SET nome = $2, bio = $3, cor = CASE WHEN $4::bool THEN $5 ELSE cor END,
+              anonimo = COALESCE($6::bool, anonimo)
         WHERE id = $1
-        RETURNING id, nome, bio, cor`,
-      [req.usuarioId, novoNome, novaBio, cor !== undefined, cor ?? null]
+        RETURNING id, nome, bio, cor, anonimo`,
+      [req.usuarioId, novoNome, novaBio, cor !== undefined, cor ?? null, anonimo ?? null]
     );
 
     res.json({ usuario: rows[0] });
@@ -445,13 +456,100 @@ router.get("/:id/foto", async (req, res, next) => {
   }
 });
 
+/**
+ * GET /api/usuarios/:id/jogados
+ *
+ * O lado JOGADOR do perfil público: o recorde pessoal da pessoa em
+ * cada quiz (a melhor partida dela, não a soma — somar premiaria
+ * quem repete o mesmo quiz), e de que categoria ela mais joga.
+ *
+ * Só entra o que já é público por outro caminho:
+ *   - partida que valeu ranking (as mesmas que somam no ranking);
+ *   - em quiz que está no catálogo — partida em sala privada, de um
+ *     rascunho, não aparece: o quiz nem é visível para os outros.
+ */
+router.get("/:id/jogados", async (req, res, next) => {
+  try {
+    const id = lerInteiro(req.params.id, { padrao: null, minimo: 1, maximo: 2147483647 });
+    if (id === null) return res.status(404).json({ erro: "Pessoa não encontrada" });
+
+    const [{ rows: quizzes }, { rows: categorias }] = await Promise.all([
+      pool.query(
+        `SELECT q.id, q.titulo, q.categoria, q.etiquetas,
+                (CASE WHEN c.quiz_id IS NOT NULL
+                      THEN '/api/quizzes/' || q.id || '/capa?v=' || q.versao END) AS imagem_url,
+                COUNT(*)::int AS partidas,
+                SUM(r.pontos)::int AS pontos,
+                MAX(r.pontos)::int AS recorde
+           FROM resultados r
+           JOIN quizzes q ON q.id = r.quiz_id
+           LEFT JOIN capas c ON c.quiz_id = q.id
+          WHERE r.usuario_id = $1 AND r.vale_ranking AND q.situacao = 'publicado'
+          GROUP BY q.id, c.quiz_id
+          ORDER BY recorde DESC, q.id
+          LIMIT 6`,
+        [id]
+      ),
+      // Empate fica com a ordem alfabética, para não mudar a cada visita.
+      pool.query(
+        `SELECT q.categoria, COUNT(*)::int AS partidas, COUNT(DISTINCT q.id)::int AS quizzes
+           FROM resultados r
+           JOIN quizzes q ON q.id = r.quiz_id
+          WHERE r.usuario_id = $1 AND r.vale_ranking AND q.situacao = 'publicado'
+          GROUP BY q.categoria
+          ORDER BY partidas DESC, q.categoria`,
+        [id]
+      )
+    ]);
+
+    res.json({
+      quizzes,
+      categoria_favorita: categorias[0]?.categoria ?? null,
+      quizzes_diferentes: categorias.reduce((soma, c) => soma + c.quizzes, 0)
+    });
+  } catch (erro) {
+    next(erro);
+  }
+});
+
+/**
+ * GET /api/usuarios/:id/partidas
+ *
+ * O histórico PÚBLICO: as últimas partidas da pessoa. A mesma lista
+ * de /eu/partidas, com o mesmo recorte de /:id/jogados — só o que
+ * valeu ranking, em quiz do catálogo. O que a pessoa jogou em sala
+ * privada, ou repetiu sem valer, é só dela (fica em /eu/partidas).
+ */
+router.get("/:id/partidas", async (req, res, next) => {
+  try {
+    const id = lerInteiro(req.params.id, { padrao: null, minimo: 1, maximo: 2147483647 });
+    if (id === null) return res.status(404).json({ erro: "Pessoa não encontrada" });
+
+    const { rows } = await pool.query(
+      `SELECT r.id, r.pontos, r.posicao, r.terminado_em, TRUE AS valeu,
+              q.id AS quiz_id, q.titulo AS quiz, TRUE AS no_catalogo,
+              (SELECT COUNT(*) FROM resultados o WHERE o.sala = r.sala)::int AS jogadores
+         FROM resultados r
+         JOIN quizzes q ON q.id = r.quiz_id
+        WHERE r.usuario_id = $1 AND r.vale_ranking AND q.situacao = 'publicado'
+        ORDER BY r.terminado_em DESC
+        LIMIT 10`,
+      [id]
+    );
+
+    res.json({ partidas: rows });
+  } catch (erro) {
+    next(erro);
+  }
+});
+
 router.get("/:id", async (req, res, next) => {
   try {
     const id = lerInteiro(req.params.id, { padrao: null, minimo: 1, maximo: 2147483647 });
     if (id === null) return res.status(404).json({ erro: "Pessoa não encontrada" });
 
     const { rows } = await pool.query(
-      `SELECT u.id, u.nome, u.criado_em, u.bio, u.cor,
+      `SELECT u.id, u.nome, u.criado_em, u.bio, u.cor, u.anonimo,
               (SELECT '/api/usuarios/' || b.usuario_id || '/banner?v=' || floor(extract(epoch FROM b.enviada_em))::bigint
                  FROM banners_perfil b WHERE b.usuario_id = u.id) AS banner,
               (SELECT COUNT(*) FROM quizzes q
@@ -469,6 +567,14 @@ router.get("/:id", async (req, res, next) => {
                 WHERE r.usuario_id = u.id AND r.vale_ranking)::int AS pontos,
               (SELECT COUNT(*) FROM resultados r
                 WHERE r.usuario_id = u.id AND r.vale_ranking AND r.posicao = 1)::int AS vitorias,
+              (SELECT COALESCE(MAX(r.pontos), 0) FROM resultados r
+                WHERE r.usuario_id = u.id AND r.vale_ranking)::int AS recorde,
+              -- Em quantos quizzes DIFERENTES do catálogo ela já jogou
+              -- valendo (repetir o mesmo quiz conta uma vez só).
+              (SELECT COUNT(DISTINCT r.quiz_id) FROM resultados r
+                 JOIN quizzes q ON q.id = r.quiz_id
+                WHERE r.usuario_id = u.id AND r.vale_ranking
+                  AND q.situacao = 'publicado')::int AS quizzes_jogados,
               (SELECT '/api/usuarios/' || f.usuario_id || '/foto?v=' || floor(extract(epoch FROM f.enviada_em))::bigint
                  FROM fotos_perfil f WHERE f.usuario_id = u.id) AS foto,
               -- O quiz dela que mais gente abriu: o melhor cartão de
@@ -493,7 +599,15 @@ router.get("/:id", async (req, res, next) => {
 
     if (rows.length === 0) return res.status(404).json({ erro: "Pessoa não encontrada" });
 
-    res.json({ usuario: rows[0] });
+    const { anonimo, ...usuario } = rows[0];
+
+    if (anonimo && req.usuarioId !== usuario.id) {
+      Object.assign(usuario, {
+        quizzes: 0, acessos: 0, nota: null, quiz_destaque: null, categoria_favorita: null
+      });
+    }
+
+    res.json({ usuario });
   } catch (erro) {
     next(erro);
   }

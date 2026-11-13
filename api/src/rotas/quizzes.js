@@ -95,7 +95,8 @@ function lerId(valor) {
  *
  * ?categoria=anime  limita a uma categoria
  * ?meus=1           só os seus (exige sessão; sem ela, vem vazio)
- * ?autor=ID         só os publicados de uma pessoa (perfil público)
+ * ?autor=ID         só os publicados de uma pessoa (perfil público);
+ *                   vazio se ela publica como anônima
  */
 router.get("/", async (req, res, next) => {
   try {
@@ -138,9 +139,7 @@ router.get("/", async (req, res, next) => {
               (SELECT COUNT(*) FROM avaliacoes v
                  JOIN resultados r USING (sala, jogador_id)
                 WHERE v.quiz_id = q.id AND r.vale_ranking)::int AS avaliacoes,
-              u.nome AS autor, u.id AS autor_id, u.cor AS autor_cor,
-              (SELECT '/api/usuarios/' || f.usuario_id || '/foto?v=' || floor(extract(epoch FROM f.enviada_em))::bigint
-                 FROM fotos_perfil f WHERE f.usuario_id = u.id) AS autor_foto,
+              ${camposDoAutor(1)},
               (q.usuario_id = $1) AS meu,
               q.situacao,
               -- Só faz sentido para o dono: pode apagar, ou já é do site?
@@ -155,6 +154,10 @@ router.get("/", async (req, res, next) => {
                     ELSE q.situacao = 'publicado' END)
           AND ($2::text IS NULL OR q.categoria = $2)
           AND ($4::int IS NULL OR q.usuario_id = $4)
+          -- Pedir "os quizzes da pessoa X" não pode entregar os de quem
+          -- publica como anônimo: seria o caminho para descobrir o autor.
+          -- (Com $1 nulo a comparação dá nulo, e a linha fica de fora.)
+          AND ($4::int IS NULL OR NOT u.anonimo OR u.id = $1)
         ORDER BY q.criado_em DESC`,
       // $1 pode ser nulo (visitante): aí `meu` vem nulo em toda
       // linha, que é a verdade — não há "seu" sem sessão.
@@ -166,6 +169,36 @@ router.get("/", async (req, res, next) => {
     next(erro);
   }
 });
+
+/**
+ * As colunas do autor, para quem está olhando (`viewer` é a posição
+ * do parâmetro com o id de quem pede; o valor pode ser nulo).
+ *
+ * O autor só vai na resposta se existe e se quer aparecer. Quem
+ * publica como anônimo (migração 023) é escondido AQUI, no servidor:
+ * nome, id, cor e foto voltam nulos para os outros — esconder só na
+ * tela deixaria tudo à vista na resposta da API. O próprio autor
+ * continua se vendo.
+ *
+ * `autor_situacao` diz à tela POR QUE não há autor:
+ *   'anonimo'       a pessoa existe e preferiu não aparecer;
+ *   'desconhecido'  a conta foi apagada (o quiz do catálogo fica);
+ *   null            há autor, nas outras colunas.
+ */
+function camposDoAutor(viewer) {
+  const aparece = `(u.id IS NOT NULL AND (NOT u.anonimo OR u.id = $${viewer}))`;
+
+  return `
+              CASE WHEN ${aparece} THEN u.nome END AS autor,
+              CASE WHEN ${aparece} THEN u.id END AS autor_id,
+              CASE WHEN ${aparece} THEN u.cor END AS autor_cor,
+              CASE WHEN ${aparece} THEN
+                (SELECT '/api/usuarios/' || f.usuario_id || '/foto?v=' || floor(extract(epoch FROM f.enviada_em))::bigint
+                   FROM fotos_perfil f WHERE f.usuario_id = u.id) END AS autor_foto,
+              CASE WHEN ${aparece} THEN NULL
+                   WHEN u.id IS NULL THEN 'desconhecido'
+                   ELSE 'anonimo' END AS autor_situacao`;
+}
 
 /**
  * GET /api/quizzes/:id
@@ -196,9 +229,7 @@ router.get("/:id", async (req, res, next) => {
               (SELECT COUNT(*) FROM avaliacoes v
                  JOIN resultados r USING (sala, jogador_id)
                 WHERE v.quiz_id = q.id AND r.vale_ranking)::int AS avaliacoes,
-              u.nome AS autor, u.id AS autor_id, u.cor AS autor_cor,
-              (SELECT '/api/usuarios/' || f.usuario_id || '/foto?v=' || floor(extract(epoch FROM f.enviada_em))::bigint
-                 FROM fotos_perfil f WHERE f.usuario_id = u.id) AS autor_foto,
+              ${camposDoAutor(2)},
               (q.usuario_id = $2) AS meu,
               q.situacao, q.moderacao_motivo
          FROM quizzes q

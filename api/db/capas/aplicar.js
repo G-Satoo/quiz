@@ -20,8 +20,9 @@ import { fileURLToPath } from "node:url";
 
 const PASTA = dirname(fileURLToPath(import.meta.url));
 
-// A conta dona do catálogo inicial (ver scripts/semear-catalogo.js).
-const CONTA_DO_CATALOGO = "demo@quiz.dev";
+// As contas de demonstração, autoras do catálogo inicial (ver
+// scripts/semear-catalogo.js): demo@quiz.dev e jogadorN@quiz.dev.
+const CONTAS_DO_CATALOGO = "%@quiz.dev";
 
 // arquivo -> título do quiz
 export const CAPAS_DO_CATALOGO = {
@@ -42,7 +43,7 @@ export const CAPAS_DO_CATALOGO = {
 /**
  * Põe (ou troca) a capa de cada quiz do catálogo inicial.
  *
- * Só toca em quiz publicado da conta de demonstração, que é a dona
+ * Só toca em quiz publicado das contas de demonstração, autoras
  * do catálogo inicial: um quiz de usuário com o mesmo título fica
  * como está. A versão
  * sobe junto, porque o endereço da capa leva ?v=versao — sem isso
@@ -60,14 +61,14 @@ export async function aplicarCapasDoCatalogo(banco) {
       `WITH alvo AS (
          UPDATE quizzes SET versao = versao + 1
           WHERE titulo = $1 AND situacao = 'publicado'
-            AND usuario_id = (SELECT id FROM usuarios WHERE email = $3)
+            AND usuario_id IN (SELECT id FROM usuarios WHERE email LIKE $3)
          RETURNING id
        )
        INSERT INTO capas (quiz_id, tipo, bytes)
        SELECT id, 'image/jpeg', $2 FROM alvo
        ON CONFLICT (quiz_id) DO UPDATE
          SET tipo = EXCLUDED.tipo, bytes = EXCLUDED.bytes, enviada_em = now()`,
-      [titulo, bytes, CONTA_DO_CATALOGO]
+      [titulo, bytes, CONTAS_DO_CATALOGO]
     );
 
     postas += rowCount;

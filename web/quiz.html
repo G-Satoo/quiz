@@ -100,7 +100,7 @@
           <div class="numeros-quiz" id="numeros"></div>
         </section>
 
-        <section class="cartao cartao-vidro escondido" id="cartao-do-autor">
+        <section class="cartao cartao-vidro" id="cartao-do-autor">
           <h2 class="rotulo-secao">Criado por</h2>
           <a class="autor-pagina" id="autor"></a>
         </section>
@@ -129,7 +129,7 @@
 // tela, para ninguém ler as perguntas antes de jogar.
 // ============================================================
 
-import { montarAvatar } from "./avatar.js";
+import { SEM_AUTOR, montarAvatar, montarAvatarSemRosto } from "./avatar.js";
 import { confirmarCopia } from "./confirmar.js";
 import { artePorCategoria, coresDaCategoria } from "./capas.js";
 
@@ -281,13 +281,19 @@ function desenhar() {
     $("numeros").append(caixa);
   }
 
-  // Autor (pode não existir mais: quiz do catálogo sobrevive à conta)
+  // Autor. Pode não haver um para mostrar: a pessoa publica como
+  // anônima, ou a conta foi apagada (o quiz do catálogo fica).
   if (quiz.autor) {
     const nome = document.createElement("span");
     nome.textContent = quiz.meu ? `${quiz.autor} (você)` : quiz.autor;
     $("autor").href = quiz.meu ? "perfil.html" : `perfil.html?id=${quiz.autor_id}`;
     $("autor").append(montarAvatar(quiz.autor, "avatar", quiz.autor_foto, quiz.autor_cor), nome);
-    $("cartao-do-autor").classList.remove("escondido");
+  } else {
+    // Anônimo ou conta apagada: a silhueta e o motivo, sem link.
+    const nome = document.createElement("span");
+    nome.textContent = SEM_AUTOR[quiz.autor_situacao] ?? SEM_AUTOR.desconhecido;
+    $("autor").classList.add("sem-autor");
+    $("autor").append(montarAvatarSemRosto("avatar"), nome);
   }
 
   // Ações
