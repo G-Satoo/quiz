@@ -1100,6 +1100,17 @@ button.conferir { font-size: 13px; padding: 7px 13px; }
      qualquer arte de fundo, clara ou escura. */
   background: var(--erro);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.selo-acessos svg {
+  width: 10px;
+  height: 10px;
+  fill: currentColor;
+  flex: none;
 }
 
 /* Sem emoji no título — o texto fica sozinho, como você pediu. */
@@ -2321,3 +2332,469 @@ button.botao-acao.discreto { border: 1px solid var(--borda); }
 /* Título, abas e legenda do ranking na mesma linha quando couber. */
 .cabecalho-fileira:has(.abas-ranking) { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
 .cabecalho-fileira:has(.abas-ranking) .nota-fileira { flex-basis: 100%; }
+
+/* ============================================================
+   Selos do topo da capa numa linha só
+
+   Acessos à esquerda, categoria à direita. Eram dois absolutos
+   independentes, e com o bonequinho o contador cresceu e passou
+   por cima de categoria comprida ("Tecnologia"). Numa linha flex
+   eles se enxergam: o contador nunca encolhe, a categoria corta
+   com reticências se não couber.
+   ============================================================ */
+
+.selos-topo {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  right: 7px;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.selos-topo .selo-acessos,
+.selos-topo .selo-categoria {
+  position: static;
+  pointer-events: auto;
+}
+
+.selos-topo .selo-acessos { flex: none; padding: 3px 6px; gap: 3px; }
+
+.selos-topo .selo-categoria {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: 0.03em;
+  padding: 3px 6px;
+}
+
+/* No destaque o autor tem foto E nome: o botão deixa de ser redondo. */
+.autor-card.autor-destaque {
+  align-items: center;
+  gap: 8px;
+  margin: 0 10px 0 0;
+  border-radius: 999px;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.autor-destaque .nome-autor { max-width: 180px; }
+
+/* O nome fala a mesma língua da ficha técnica: mono, caixa alta e
+   o traço separando do que vem depois. */
+.linha-meta .autor-destaque { margin-right: 0; }
+
+.autor-destaque .nome-autor {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+}
+
+.linha-meta .autor-destaque:not([hidden])::after {
+  content: "|";
+  margin: 0 12px 0 4px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.25);
+}
+
+/* ============================================================
+   A página de um quiz (quiz.html)
+
+   Três colunas: capa e ações | o quiz e a partida | ficha e números.
+   Atrás, a capa borrada (ou as cores da categoria), para a página
+   ter a cara do quiz sem competir com o texto.
+   ============================================================ */
+
+.pagina-quiz { position: relative; }
+
+.fundo-quiz {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 520px;
+  z-index: -1;
+  overflow: hidden;
+  opacity: 0.55;
+  -webkit-mask-image: linear-gradient(#000 35%, transparent);
+          mask-image: linear-gradient(#000 35%, transparent);
+}
+
+.fundo-quiz img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(60px) saturate(1.3);
+  transform: scale(1.3);
+}
+
+.conteudo-quiz { max-width: 1240px; padding-top: 28px; }
+
+.grade-quiz {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr) 320px;
+  gap: 28px;
+  align-items: start;
+}
+
+/* ----- Coluna da capa ----- */
+
+.lado-capa { display: flex; flex-direction: column; gap: 10px; }
+
+.capa-pagina {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  border-radius: var(--raio);
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+
+.capa-pagina svg, .capa-pagina .foto-capa {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.linha-selos { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }
+
+.selo-pagina, .selo-situacao {
+  padding: 3px 9px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--sucesso);
+  border: 1px solid rgba(72, 199, 142, 0.45);
+  background: rgba(72, 199, 142, 0.12);
+}
+
+.selo-situacao {
+  color: var(--alerta, #f0b455);
+  border-color: rgba(240, 180, 85, 0.45);
+  background: rgba(240, 180, 85, 0.12);
+}
+
+.linha-nota { font-size: 14px; font-weight: 700; white-space: pre; }
+
+.botao-pagina {
+  display: block;
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--borda);
+  background: rgba(10, 12, 16, 0.55);
+  color: var(--texto);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.botao-pagina:hover { border-color: var(--texto-fraco); filter: none; }
+.botao-pagina.cheio { background: #fff; color: #0b0d11; border-color: #fff; }
+.botao-pagina.cheio:hover { background: #e6e9ef; }
+.botao-pagina.desligado { pointer-events: none; opacity: 0.5; }
+
+.link-denunciar {
+  align-self: center;
+  font-size: 12px;
+  color: var(--texto-fraco);
+  text-decoration: none;
+}
+.link-denunciar:hover { color: var(--erro); }
+
+/* ----- Coluna do meio ----- */
+
+.titulo-pagina {
+  margin: 0 0 20px;
+  font-size: clamp(26px, 3.4vw, 40px);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+
+.meio-quiz { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.meio-quiz .titulo-pagina { margin-bottom: 0; }
+.meio-quiz .cartao-partida { margin-bottom: 0; }
+
+/* Vidro fosco: o fundo colorido aparece de leve por trás. */
+.cartao-vidro {
+  background: rgba(28, 31, 38, 0.72);
+  backdrop-filter: blur(14px);
+}
+
+.rotulo-secao {
+  margin: 0 0 12px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--texto-fraco);
+}
+
+.descricao-pagina { margin: 0; white-space: pre-line; }
+
+.etiquetas-pagina { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
+.etiquetas-pagina:empty { display: none; }
+
+.etiqueta {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--borda);
+  font-size: 12px;
+  color: var(--texto-fraco);
+}
+
+/* ----- Coluna da ficha ----- */
+
+.lado-ficha { display: flex; flex-direction: column; gap: 20px; }
+
+.ficha {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px 16px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.ficha dt { color: var(--texto-fraco); }
+.ficha dd { margin: 0; text-align: right; font-weight: 700; }
+
+.numeros-quiz { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+
+.numero-quiz {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 12px 4px;
+  border-radius: 8px;
+  background: rgba(10, 12, 16, 0.45);
+}
+
+.numero-quiz strong { font-size: 17px; }
+.numero-quiz span {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--texto-fraco);
+}
+
+.autor-pagina {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--texto);
+  font-weight: 700;
+  text-decoration: none;
+}
+.autor-pagina:hover span:last-child { text-decoration: underline; }
+.autor-pagina .avatar { width: 36px; height: 36px; font-size: 15px; flex: none; }
+
+/* ----- Telas menores: a ficha desce, depois tudo empilha ----- */
+
+@media (max-width: 1080px) {
+  .grade-quiz { grid-template-columns: 210px minmax(0, 1fr); }
+  .lado-ficha { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+}
+
+@media (max-width: 680px) {
+  .grade-quiz { grid-template-columns: 1fr; }
+  .lado-capa { max-width: 260px; width: 100%; margin: 0 auto; }
+  .titulo-pagina { text-align: center; }
+}
+
+/* Janela de confirmação (confirmar.js): pergunta, e dois botões à direita. */
+.janela-confirmar h2 { margin: 0; }
+.botoes-confirmar { display: flex; justify-content: flex-end; gap: 10px; }
+
+/* Título do card em UMA linha, cortado com reticências: título de
+   duas linhas empurrava "10 perguntas" para baixo e a fileira ficava
+   desalinhada. O nome inteiro aparece ao passar o mouse (title) e na
+   página do quiz. */
+.titulo-card {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ----- Página do quiz: título numa linha própria -----
+   O título ficava DENTRO da coluna do meio, e por isso os cartões
+   dela começavam mais embaixo que a capa e a ficha técnica. Agora
+   ele é uma linha da grade, acima do meio e da direita; os cartões
+   das duas colunas começam juntos. */
+
+.grade-quiz {
+  grid-template-areas:
+    "capa titulo titulo"
+    "capa meio   ficha";
+  row-gap: 18px;
+}
+
+.grade-quiz > .lado-capa { grid-area: capa; }
+.grade-quiz > .titulo-pagina { grid-area: titulo; margin: 0; }
+.grade-quiz > .meio-quiz { grid-area: meio; }
+.grade-quiz > .lado-ficha { grid-area: ficha; }
+
+@media (max-width: 1080px) {
+  .grade-quiz {
+    grid-template-areas:
+      "capa  titulo"
+      "capa  meio"
+      "ficha ficha";
+  }
+  .grade-quiz > .lado-ficha { grid-column: auto; }
+}
+
+@media (max-width: 680px) {
+  .grade-quiz {
+    grid-template-areas: "capa" "titulo" "meio" "ficha";
+  }
+}
+
+/* ----- Recomendações, embaixo ----- */
+
+.recomendados { margin-top: 44px; }
+.recomendados .titulo-secao-catalogo { margin: 0 0 14px; }
+
+.grade-recomendados {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 20px 16px;
+}
+
+.card-recomendado { display: block; color: inherit; text-decoration: none; }
+.card-recomendado .meta-card { color: var(--texto-fraco); }
+
+@media (max-width: 1080px) { .grade-recomendados { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 520px)  { .grade-recomendados { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* A coluna do meio estica até a altura da ficha ao lado, e quem
+   cresce é o cartão "Montar a partida": as duas colunas terminam
+   na mesma linha, sem um vão embaixo do meio. */
+@media (min-width: 1081px) {
+  .grade-quiz > .meio-quiz { align-self: stretch; }
+  .meio-quiz .cartao-partida { flex: 1; }
+}
+
+/* O título atravessa a página inteira, centralizado; a capa desce
+   para a linha dos cartões e as três colunas começam juntas. */
+.grade-quiz {
+  grid-template-areas:
+    "titulo titulo titulo"
+    "capa   meio   ficha";
+}
+
+.grade-quiz > .titulo-pagina { text-align: center; margin-bottom: 6px; }
+
+@media (max-width: 1080px) {
+  .grade-quiz {
+    grid-template-areas:
+      "titulo titulo"
+      "capa   meio"
+      "ficha  ficha";
+  }
+}
+
+@media (max-width: 680px) {
+  .grade-quiz { grid-template-areas: "titulo" "capa" "meio" "ficha"; }
+}
+
+/* O título fica centralizado sobre a coluna do MEIO (e não sobre a
+   página): como a capa é mais estreita que a ficha, o centro da
+   página cai fora do centro dos cartões, e o título parecia torto. */
+@media (min-width: 1081px) {
+  .grade-quiz {
+    grid-template-areas:
+      ".    titulo ."
+      "capa meio   ficha";
+  }
+}
+
+/* Texto da etiqueta no meio da pílula: a altura de linha herdada
+   (1.5) deixava a palavra deslocada dentro da borda. */
+.etiqueta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  padding: 0 12px 1px;
+  line-height: 1;
+}
+
+/* ----- Montar a partida, na página do quiz -----
+   O cartão estica até a base da coluna ao lado. Em vez de sobrar um
+   vazio embaixo, os blocos se distribuem pela altura e o botão
+   Apresentar vira a base do cartão, de ponta a ponta. */
+.pagina-quiz .cartao-partida {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+/* O cabeçalho deixa de ser uma caixa: título e botão passam a ser
+   itens do cartão, e o botão vai para o fim. */
+.pagina-quiz .cabeca-partida { display: contents; }
+
+.pagina-quiz #botao-apresentar {
+  order: 9;
+  width: 100%;
+  padding: 14px;
+  font-size: 16px;
+}
+
+.pagina-quiz .sugestoes-partida,
+.pagina-quiz .campos-partida input,
+.pagina-quiz .estimativa-partida,
+.pagina-quiz .aviso-partida { margin: 0; }
+
+.pagina-quiz .sugestoes-partida button { padding: 12px 6px; }
+.pagina-quiz .estimativa-partida { text-align: center; font-size: 20px; }
+.pagina-quiz .estimativa-partida.invalida { font-size: 14px; }
+.pagina-quiz .aviso-partida { text-align: center; }
+
+/* O tempo padrão aparece no campo vazio: um pouco mais visível que
+   um placeholder comum, porque aqui ele é informação, não exemplo. */
+#partida-segundos::placeholder { color: var(--texto); opacity: 0.75; }
+
+/* Assuntos do quiz: um rótulo e, embaixo, caixinhas retas (não
+   pílulas), com a primeira letra maiúscula. */
+.bloco-etiquetas { margin-top: 20px; }
+.bloco-etiquetas .rotulo-secao { margin-bottom: 10px; }
+.bloco-etiquetas .etiquetas-pagina { margin-top: 0; gap: 8px; }
+
+.etiqueta {
+  height: 30px;
+  padding: 0 12px 1px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--texto);
+}
+.etiqueta::first-letter { text-transform: uppercase; }
+.etiqueta { text-transform: capitalize; }
+
+/* Palavra enorme sem espaço (um link, por exemplo) quebra dentro do
+   cartão em vez de estourar a coluna. */
+.descricao-pagina, .titulo-pagina { overflow-wrap: anywhere; }
+
+/* Rodapé do editor: salvar e, ao lado, ir para a página do quiz. */
+.rodape-editor { display: flex; flex-wrap: wrap; gap: 10px; }

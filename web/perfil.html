@@ -124,9 +124,7 @@
         o que foi aprovado.
       -->
       <p class="subtitulo" id="explicacao-lista" style="margin-top:-4px">
-        Rascunhos você apresenta numa sala privada, por código. No catálogo
-        público só aparece o que foi aprovado. Para mudar um quiz que já está
-        no catálogo, duplique: a cópia é sua.
+        Para mudar um quiz que já está no catálogo, duplique: a cópia é sua.
       </p>
       <div class="catalogo meus-quizzes" id="meus"></div>
       <div id="meus-vazio" class="vazio escondido">Você ainda não criou nenhum quiz.</div>
@@ -159,6 +157,7 @@
 // ============================================================
 
 import { CORES_DO_PERFIL, fundoDoPerfil, montarAvatar } from "./avatar.js";
+import { confirmarCopia } from "./confirmar.js";
 import { artePorCategoria } from "./capas.js";
 
 const $ = (id) => document.getElementById(id);
@@ -182,7 +181,8 @@ const numero = (n) => n.toLocaleString("pt-BR");
 const CATEGORIAS = {
   geral: "Geral", anime: "Anime", games: "Games", filmes: "Filmes",
   musica: "Música", esportes: "Esportes", historia: "História",
-  ciencia: "Ciência", tecnologia: "Tecnologia", educacao: "Educação"
+  ciencia: "Ciência", tecnologia: "Tecnologia", educacao: "Educação",
+  geografia: "Geografia", natureza: "Natureza", culinaria: "Culinária"
 };
 
 const ROTULOS_SITUACAO = {
@@ -240,7 +240,7 @@ async function mostrarPublico() {
       const linha = document.createElement("p");
       linha.append("Mais acessado: ");
       const link = document.createElement("a");
-      link.href = `editor.html?id=${usuario.quiz_destaque.id}`;
+      link.href = `quiz.html?id=${usuario.quiz_destaque.id}`;
       link.textContent = usuario.quiz_destaque.titulo;
       linha.append(link, ` · ${numero(usuario.quiz_destaque.acessos)} acessos`);
       extras.append(linha);
@@ -592,6 +592,7 @@ function desenharMeu(quiz, { publico = false } = {}) {
   const titulo = document.createElement("h3");
   titulo.className = "titulo-card";
   titulo.textContent = quiz.titulo; // texto, nunca innerHTML
+  titulo.title = quiz.titulo;      // o card corta título comprido
 
   const meta = document.createElement("div");
   meta.className = "meta-card";
@@ -602,13 +603,13 @@ function desenharMeu(quiz, { publico = false } = {}) {
   const acoes = document.createElement("div");
   acoes.className = "acoes-meu";
 
-  // "Abrir sala" vai à página do quiz: é lá que se monta a partida
-  // (quantas perguntas, quanto tempo), se ajusta o conteúdo e se
-  // apresenta. Rascunho abre sala privada; publicado, a normal.
+  // A página do quiz é onde se monta a partida e se abre a sala
+  // (rascunho abre sala privada; publicado, a normal). De lá o dono
+  // chega à edição pelo botão "Editar".
   const abrir = document.createElement("a");
   abrir.className = "botao-acao";
-  abrir.href = "editor.html?id=" + quiz.id;
-  abrir.textContent = "Abrir sala";
+  abrir.href = "quiz.html?id=" + quiz.id;
+  abrir.textContent = "Ver quiz";
 
   // Duplicar: a cópia é sua para mudar à vontade — é o caminho
   // para alterar um quiz que já está no catálogo.
@@ -617,6 +618,7 @@ function desenharMeu(quiz, { publico = false } = {}) {
   duplicar.className = "botao-acao discreto";
   duplicar.textContent = "Duplicar";
   duplicar.addEventListener("click", async () => {
+    if (!(await confirmarCopia(quiz.titulo))) return;
     duplicar.disabled = true;
     try {
       const { quiz: copia } = await pedir("POST", `/api/quizzes/${quiz.id}/copia`);
@@ -682,7 +684,7 @@ async function carregarPartidas() {
       const quiz = document.createElement(partida.no_catalogo ? "a" : "span");
       quiz.className = "quiz-partida";
       quiz.textContent = partida.quiz; // texto, nunca innerHTML
-      if (partida.no_catalogo) quiz.href = `editor.html?id=${partida.quiz_id}`;
+      if (partida.no_catalogo) quiz.href = `quiz.html?id=${partida.quiz_id}`;
 
       const detalhe = document.createElement("span");
       detalhe.className = "detalhe-partida";

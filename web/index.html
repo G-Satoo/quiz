@@ -279,7 +279,6 @@
     <section id="tela-fim" class="escondido">
       <h1>Fim da partida</h1>
       <div class="podio" id="podio"></div>
-      <p class="subtitulo">Placar final.</p>
       <ol class="placar" id="placar-final"></ol>
       <button class="discreto" style="margin-top:24px" onclick="location.reload()">
         Voltar ao início
@@ -307,6 +306,7 @@
 import { criarConexao, pintarEstado } from "./conexao.js";
 import { artePorCategoria, coresDaCategoria } from "./capas.js";
 import { fundoDoPerfil, montarAvatar } from "./avatar.js";
+import { confirmarCopia } from "./confirmar.js";
 import { montarPodio } from "./podio.js";
 
 const $ = (id) => document.getElementById(id);
@@ -451,6 +451,15 @@ function linhaDoAutor(quiz, classeExtra = "") {
   botao.setAttribute("aria-label", `Perfil de ${nome}`);
   botao.append(montarAvatar(quiz.autor, "avatar avatar-autor", quiz.autor_foto, quiz.autor_cor));
 
+  // No destaque há espaço para o nome ao lado da foto; nos cards
+  // pequenos fica só a foto (o nome está no cartãozinho do clique).
+  if (classeExtra.includes("autor-destaque")) {
+    const rotulo = document.createElement("span");
+    rotulo.className = "nome-autor";
+    rotulo.textContent = nome; // texto, nunca innerHTML
+    botao.append(rotulo);
+  }
+
   botao.addEventListener("click", (evento) => {
     // Senão o clique "atravessa" para o fechamento por clique fora.
     evento.stopPropagation();
@@ -579,7 +588,7 @@ async function abrirCartaoAutor(quiz, ancora) {
       const linha = document.createElement("p");
       linha.append("Mais acessado: ");
       const link = document.createElement("a");
-      link.href = `editor.html?id=${usuario.quiz_destaque.id}`;
+      link.href = `quiz.html?id=${usuario.quiz_destaque.id}`;
       link.textContent = usuario.quiz_destaque.titulo;
       linha.append(link);
       extras.append(linha);
@@ -628,8 +637,10 @@ addEventListener("resize", posicionarCartao);
 // ============================================================
 
 /** Leva à página do quiz, onde a partida é montada antes de abrir. */
+// Vai para a PÁGINA do quiz (quiz.html): o que ele é, quem fez, e
+// ali mesmo montar a partida. A tela de edição fica para o dono.
 function prepararPartida(quiz) {
-  location.href = `editor.html?id=${quiz.id}`;
+  location.href = `quiz.html?id=${quiz.id}`;
 }
 
 /**
@@ -641,6 +652,9 @@ async function duplicarQuiz(quiz, botao) {
   if (!eu) {
     return pedirConta("Entre para duplicar um quiz e editar a sua cópia.", () => duplicarQuiz(quiz, botao));
   }
+
+  // Duplicar grava uma cópia na conta: pergunta antes.
+  if (!(await confirmarCopia(quiz.titulo))) return;
 
   botao.disabled = true;
 
@@ -924,7 +938,8 @@ const jogavel = (quiz) => quiz.perguntas >= MINIMO_PERGUNTAS;
 const CATEGORIAS = {
   geral: "Geral", anime: "Anime", games: "Games", filmes: "Filmes",
   musica: "Música", esportes: "Esportes", historia: "História",
-  ciencia: "Ciência", tecnologia: "Tecnologia", educacao: "Educação"
+  ciencia: "Ciência", tecnologia: "Tecnologia", educacao: "Educação",
+  geografia: "Geografia", natureza: "Natureza", culinaria: "Culinária"
 };
 
 /**
@@ -1054,7 +1069,8 @@ function desenharDestaque() {
   const linha = document.createElement("div");
   linha.className = "linha-meta";
   linha.append(
-    marcador(CATEGORIAS[quiz.categoria] ?? quiz.categoria),
+    // Só a etiqueta principal, como na capa dos cards.
+    marcador(quiz.etiquetas?.[0] ?? CATEGORIAS[quiz.categoria] ?? quiz.categoria),
     marcador(quiz.perguntas + " pergunta" + (quiz.perguntas === 1 ? "" : "s"))
   );
 
@@ -1087,8 +1103,7 @@ function desenharDestaque() {
   const jogar = document.createElement("button");
   jogar.className = "pilula pilula-cheia";
   jogar.innerHTML = '<span aria-hidden="true">▶</span>';
-  jogar.append(jogavel(quiz) ? " Abrir sala" : " Incompleto");
-  jogar.disabled = !jogavel(quiz);
+  jogar.append(" Ver quiz");
   jogar.addEventListener("click", () => prepararPartida(quiz));
   acoes.append(jogar);
 
@@ -1210,17 +1225,14 @@ function desenharFileiras() {
   const fileiras = [
     {
       titulo: "Mais acessados",
-      nota: "de todos os tempos",
       lista: ordenarPor(todosOsQuizzes, "partidas")
     },
     {
       titulo: "Mais acessados da semana",
-      nota: "últimos 7 dias",
       lista: ordenarPor(todosOsQuizzes, "acessos_semana")
     },
     {
       titulo: "Mais acessados hoje",
-      nota: "desde a meia-noite",
       lista: ordenarPor(todosOsQuizzes, "acessos_hoje")
     }
   ];
@@ -1275,13 +1287,8 @@ function desenharFileira(fileira) {
   h2.className = "titulo-secao-catalogo";
   h2.textContent = fileira.titulo;
 
-  // A nota diz de onde vem o critério. Uma fileira chamada
-  // "mais acessados" sem dizer o período é afirmação sem lastro.
-  const legenda = document.createElement("span");
-  legenda.className = "nota-fileira";
-  legenda.textContent = fileira.nota;
-
-  cabecalho.append(h2, legenda);
+  // O período está no próprio título ("... da semana", "... hoje").
+  cabecalho.append(h2);
 
   // Rolagem horizontal: a fileira mostra o começo e sugere que
   // há mais, em vez de quebrar em linhas e virar outra grade.
@@ -1304,10 +1311,13 @@ function desenharFileira(fileira) {
 // O dia e a semana viram à meia-noite de Brasília (a semana, na
 // segunda): quem decide é o servidor.
 
+// As abas já dizem o período; a seção não leva legenda. (Soma os
+// pontos de quem joga COM CONTA — quem entra sem conta é avisado
+// disso na hora de entrar na sala.)
 const PERIODOS = [
-  ["hoje", "Hoje", "quem mais somou pontos hoje"],
-  ["semana", "Semana", "quem mais somou pontos desde segunda"],
-  ["sempre", "Sempre", "quem mais somou pontos desde o começo"]
+  ["hoje", "Hoje"],
+  ["semana", "Semana"],
+  ["sempre", "Sempre"]
 ];
 
 let periodoAtual = "hoje";
@@ -1344,7 +1354,6 @@ async function carregarJogadoresDoDia() {
 async function desenharRanking() {
   const caixa = $("jogadores-dia");
   const jogadores = await lerRanking(periodoAtual);
-  const [, , explicacao] = PERIODOS.find(([valor]) => valor === periodoAtual);
 
   const secao = document.createElement("section");
   secao.className = "fileira";
@@ -1378,18 +1387,14 @@ async function desenharRanking() {
     abas.append(aba);
   }
 
-  const legenda = document.createElement("span");
-  legenda.className = "nota-fileira";
-  legenda.textContent = `${explicacao} · só quem joga com conta`;
-
-  cabecalho.append(h2, abas, legenda);
+  cabecalho.append(h2, abas);
   secao.append(cabecalho);
 
   if (jogadores.length === 0) {
     const vazio = document.createElement("p");
     vazio.className = "ranking-vazio";
     vazio.textContent = periodoAtual === "hoje"
-      ? "Ninguém pontuou hoje ainda. Jogue um quiz do catálogo logado e apareça aqui."
+      ? "Ninguém pontuou hoje ainda."
       : "Ninguém pontuou nesta semana ainda.";
     secao.append(vazio);
   } else {
@@ -1479,7 +1484,8 @@ function desenharCatalogo() {
     // Todas as palavras digitadas têm que aparecer em algum lugar:
     // "naruto classic" acha o quiz mesmo com as palavras separadas.
     const onde = semAcento(
-      [q.titulo, q.tema, q.descricao, q.autor, CATEGORIAS[q.categoria]].filter(Boolean).join(" ")
+      [q.titulo, q.tema, q.descricao, q.autor, CATEGORIAS[q.categoria], ...(q.etiquetas ?? [])]
+        .filter(Boolean).join(" ")
     );
     return termos.every((termo) => onde.includes(termo));
   });
@@ -1512,13 +1518,22 @@ function desenharCartao(quiz, estreito) {
 
   const selo = document.createElement("span");
   selo.className = "selo-categoria";
-  selo.textContent = CATEGORIAS[quiz.categoria] ?? quiz.categoria;
+  // Na capa vai a etiqueta PRINCIPAL ("corrida"), mais específica que
+  // a categoria ("Esportes") — que continua dando a cor, o desenho e
+  // o filtro. Quiz sem etiqueta mostra a categoria.
+  selo.textContent = quiz.etiquetas?.[0] ?? CATEGORIAS[quiz.categoria] ?? quiz.categoria;
+  selo.title = [CATEGORIAS[quiz.categoria] ?? quiz.categoria, ...(quiz.etiquetas ?? [])].join(" · ");
 
   // Contador no canto oposto ao selo: um de cada lado, para os
   // dois serem lidos de relance sem se atrapalharem.
   const contador = document.createElement("span");
   contador.className = "selo-acessos";
-  contador.textContent = formatarAcessos(quiz.partidas);
+  // O bonequinho diz "pessoas" sem precisar de legenda. É SVG fixo,
+  // nosso; o número entra depois, como texto.
+  contador.innerHTML =
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="5" r="3"/>' +
+    '<path d="M2.5 14.5c0-3 2.5-5 5.5-5s5.5 2 5.5 5z"/></svg>';
+  contador.append(formatarAcessos(quiz.partidas));
   contador.title = quiz.partidas + " vez(es) apresentado";
 
   // Quiz sem pergunta não abre sala; dizer isso na capa evita o
@@ -1537,8 +1552,7 @@ function desenharCartao(quiz, estreito) {
   // jeito certo: abrir aqui direto obrigava a voltar ao editor e
   // abrir OUTRA sala, com outro código, a cada ajuste.
   const jogar = document.createElement("button");
-  jogar.textContent = jogavel(quiz) ? "Abrir sala" : "Incompleto";
-  jogar.disabled = !jogavel(quiz);
+  jogar.textContent = "Ver quiz";
   jogar.addEventListener("click", () => prepararPartida(quiz));
 
   // Duplicar: a cópia é sua, para mudar o que quiser.
@@ -1549,11 +1563,18 @@ function desenharCartao(quiz, estreito) {
 
   acoes.append(jogar, duplicar);
 
-  capa.append(selo, contador, aviso, acoes);
+  // Os dois selos de cima dividem UMA linha: assim nunca ficam um
+  // sobre o outro — se faltar espaço, a categoria encolhe.
+  const selosDoTopo = document.createElement("div");
+  selosDoTopo.className = "selos-topo";
+  selosDoTopo.append(contador, selo);
+
+  capa.append(selosDoTopo, aviso, acoes);
 
   const titulo = document.createElement("h3");
   titulo.className = "titulo-card";
   titulo.textContent = quiz.titulo; // texto, nunca innerHTML
+  titulo.title = quiz.titulo;      // o card corta título comprido
 
   // O número de acessos mora na capa, no canto esquerdo. Embaixo
   // ficam quem fez e o tamanho do quiz.

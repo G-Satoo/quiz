@@ -10,6 +10,7 @@ import {
   validarSenha,
   lerInteiro,
   normalizarTexto,
+  normalizarEtiquetas,
   validarPerguntas
 } from "../src/util/validacao.js";
 
@@ -114,5 +115,29 @@ describe("validarPerguntas: repetição", () => {
   it("aceita a mesma alternativa em perguntas diferentes", () => {
     // "Verdadeiro/Falso" em várias perguntas é legítimo.
     assert.equal(validarPerguntas(dez), null);
+  });
+});
+
+describe("normalizarEtiquetas", () => {
+  it("põe em minúsculas, apara e mantém a ordem (a primeira é a principal)", () => {
+    assert.deepEqual(normalizarEtiquetas([" Corrida ", "AUTOMOBILISMO", "carros"]),
+      ["corrida", "automobilismo", "carros"]);
+  });
+
+  it("tira as repetidas e para na quarta", () => {
+    assert.deepEqual(normalizarEtiquetas(["rock", "Rock", "banda", "brasil", "anos 80", "guitarra"]),
+      ["rock", "banda", "brasil", "anos 80"]);
+  });
+
+  it("descarta o que não é etiqueta: curta, longa, com símbolo, não-texto", () => {
+    assert.deepEqual(
+      normalizarEtiquetas(["a", "x".repeat(21), "<b>oi</b>", 42, null, "super-heróis", "século 19"]),
+      ["super-heróis", "século 19"]
+    );
+  });
+
+  it("o que não é lista vira lista vazia", () => {
+    assert.deepEqual(normalizarEtiquetas(undefined), []);
+    assert.deepEqual(normalizarEtiquetas("corrida"), []);
   });
 });

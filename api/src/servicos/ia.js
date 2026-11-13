@@ -27,7 +27,7 @@
 
 import "dotenv/config";
 
-import { CATEGORIAS, normalizarTexto, validarPergunta } from "../util/validacao.js";
+import { CATEGORIAS, MAX_ETIQUETAS, normalizarEtiquetas, normalizarTexto, validarPergunta } from "../util/validacao.js";
 
 const SEGUNDOS_PADRAO = 20;
 
@@ -685,9 +685,10 @@ const ESQUEMA_MODERACAO = {
     decisao: { type: "STRING", enum: ["aprovar", "recusar", "revisar"] },
     categoria: { type: "STRING", enum: CATEGORIAS_MODERACAO },
     assunto: { type: "STRING", enum: CATEGORIAS },
+    etiquetas: { type: "ARRAY", items: { type: "STRING" } },
     motivo: { type: "STRING" }
   },
-  required: ["decisao", "categoria", "assunto", "motivo"]
+  required: ["decisao", "categoria", "assunto", "etiquetas", "motivo"]
 };
 
 /**
@@ -782,6 +783,16 @@ Responda em JSON:
 - "assunto": a categoria do catálogo onde o quiz vai aparecer, pelo
   CONTEÚDO das perguntas (não pelo título): ${CATEGORIAS.join(", ")}.
   "geral" só se nenhuma outra servir
+- "etiquetas": de 2 a ${MAX_ETIQUETAS} assuntos a que o quiz pertence, em
+  português, minúsculas, uma ou duas palavras cada.
+  A PRIMEIRA é a principal e aparece na capa: é o GRUPO pelo qual uma
+  pessoa procuraria este quiz e outros parecidos — o que ele tem em
+  comum com os outros, não um detalhe do conteúdo. Naruto e Dragon
+  Ball são "anime" (não "ninja" nem "luta"); Fórmula 1 é "corrida";
+  um quiz dos Beatles é "rock". Uma palavra só, de até 12 letras;
+  pode coincidir com a categoria quando ela já é esse grupo.
+  As SEGUINTES descem ao detalhe ("mangá", "ninja") e servem à busca.
+  Não repita o título do quiz.${blocoEtiquetasEmUso(quiz.etiquetasEmUso)}
 - "motivo": uma frase em português, para o autor do quiz entender
   o que corrigir. Se aprovar, uma frase curta dizendo que está ok.
 ${comCapa ? BLOCO_DA_CAPA : ""}
@@ -808,6 +819,22 @@ async function moderarComFalso(quiz, capa) {
     return { decisao: "revisar", categoria: "gabarito", motivo: "Não tenho certeza do gabarito (provedor falso)." };
   }
   return { decisao: "aprovar", categoria: "nenhum", motivo: "Tudo certo (provedor falso)." };
+}
+
+// Sem isto cada quiz inventaria a sua grafia ("corrida", "corridas",
+// "automobilismo"...) e etiqueta deixaria de agrupar.
+function blocoEtiquetasEmUso(emUso) {
+  if (!Array.isArray(emUso) || emUso.length === 0) return "";
+  return `\n  Etiquetas que o catálogo já usa — quando uma delas servir, use-a
+  exatamente como está em vez de criar outra parecida:
+  ${emUso.join(", ")}`;
+}
+
+// Nos testes: "[etiquetas:corrida,carros]" no texto do quiz.
+function etiquetasDoFalso(quiz) {
+  const texto = JSON.stringify(quizParaModeracao(quiz)).toLowerCase();
+  const achado = texto.match(/\[etiquetas:([^\]]*)\]/);
+  return achado ? achado[1].split(",") : [];
 }
 
 // O falso escolhe o assunto por um marcador no texto ("[assunto:anime]"
@@ -999,7 +1026,11 @@ export async function moderarQuiz(quiz, capa = null) {
   const motivo = String(bruto?.motivo ?? "").trim().slice(0, 300) ||
     (decisao === "aprovar" ? "Aprovado." : "A análise não explicou o motivo.");
 
-  return { decisao, categoria, assunto, motivo };
+  // As etiquetas vêm do modelo, ou seja: são texto de fora. Passam
+  // pela mesma peneira que qualquer entrada.
+  const etiquetas = normalizarEtiquetas(provedor === "falso" ? etiquetasDoFalso(quiz) : bruto?.etiquetas);
+
+  return { decisao, categoria, assunto, etiquetas, motivo };
 }
 
 // ============================================================

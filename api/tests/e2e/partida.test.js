@@ -83,7 +83,11 @@ describe("uma partida pelas telas", () => {
     celular.on("pageerror", (erro) => erros.push(`celular: ${erro.message}`));
 
     // ----- A sala abre, com código e QR -----
-    await telao.goto(`${base}/index.html?apresentar=${dados.quiz.id}`);
+    // Pela página do quiz, que é por onde o catálogo leva: o botão
+    // "Abrir sala" de lá apresenta com todas as perguntas.
+    await telao.goto(`${base}/quiz.html?id=${dados.quiz.id}`);
+    assert.equal(await telao.locator("#titulo").textContent(), "Quiz de teste");
+    await telao.locator("#botao-jogar").click();
     await telao.locator("#tela-espera").waitFor();
     const codigo = (await telao.locator("#codigo").textContent()).trim();
     assert.match(codigo, /^[A-Z0-9]{6}$/);

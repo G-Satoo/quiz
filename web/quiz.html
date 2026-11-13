@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quiz</title>
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body class="pagina-quiz">
+  <!-- A capa (ou a cor da categoria), borrada, atrás de tudo. -->
+  <div class="fundo-quiz" id="fundo-quiz" aria-hidden="true"></div>
+
+  <div class="topo">
+    <a class="marca" href="index.html">quiz<span>.</span></a>
+    <a href="index.html" style="font-size:13px">← Catálogo</a>
+  </div>
+
+  <div class="conteudo conteudo-quiz">
+    <div id="erro-pagina" class="erro escondido"></div>
+
+    <!-- O título é filho direto da grade: ocupa uma linha própria
+         acima das colunas do meio e da direita, para os cartões das
+         duas começarem na mesma altura. -->
+    <div class="grade-quiz escondido" id="grade-quiz">
+
+      <!-- Coluna 1: capa e ações -->
+      <aside class="lado-capa">
+        <div class="capa capa-pagina" id="capa"></div>
+
+        <div class="linha-selos">
+          <span class="selo-pagina" id="selo-principal"></span>
+          <span class="selo-situacao escondido" id="selo-situacao"></span>
+        </div>
+
+        <div class="linha-nota" id="linha-nota"></div>
+
+        <button type="button" class="botao-pagina cheio" id="botao-jogar">▶ Abrir sala</button>
+        <button type="button" class="botao-pagina" id="botao-duplicar">Duplicar</button>
+        <a class="botao-pagina escondido" id="botao-editar">Editar</a>
+        <a class="link-denunciar escondido" id="link-denunciar">⚑ Denunciar</a>
+
+        <p class="credito-capa escondido" id="credito-capa"></p>
+      </aside>
+
+      <!-- Coluna 2: o quiz e a partida -->
+      <h1 class="titulo-pagina" id="titulo"></h1>
+
+      <main class="meio-quiz">
+
+        <section class="cartao cartao-vidro">
+          <h2 class="rotulo-secao">Sobre o quiz</h2>
+          <p class="descricao-pagina" id="descricao"></p>
+          <div class="bloco-etiquetas escondido" id="bloco-etiquetas">
+            <h3 class="rotulo-secao">Assuntos</h3>
+            <div class="etiquetas-pagina" id="etiquetas"></div>
+          </div>
+        </section>
+
+        <!--
+          Montar a partida: quantas perguntas e quanto tempo. Aqui só
+          se ESCOLHE; quem abre a sala é o botão "Abrir sala", ao lado
+          da capa — um botão só para isso na página.
+        -->
+        <section class="cartao cartao-vidro cartao-partida" id="montar">
+          <h2 class="rotulo-secao" style="margin:0">Montar a partida</h2>
+
+          <div class="sugestoes-partida" id="sugestoes-partida">
+            <button type="button" class="discreto" data-minutos="0">Todas</button>
+            <button type="button" class="discreto" data-minutos="30">30 min</button>
+            <button type="button" class="discreto" data-minutos="60">1 hora</button>
+            <button type="button" class="discreto" data-minutos="120">2 horas</button>
+          </div>
+
+          <div class="campos-partida">
+            <div>
+              <label for="partida-quantidade">Perguntas</label>
+              <input id="partida-quantidade" type="number" inputmode="numeric" min="10" step="1">
+            </div>
+            <div>
+              <label for="partida-segundos">Segundos por pergunta</label>
+              <input id="partida-segundos" type="number" inputmode="numeric" min="10" max="300" step="1"
+                     placeholder="20">
+            </div>
+          </div>
+
+          <p class="estimativa-partida" id="partida-estimativa"></p>
+          <p class="aviso-partida" id="partida-aviso"></p>
+        </section>
+      </main>
+
+      <!-- Coluna 3: ficha, números e autor -->
+      <aside class="lado-ficha">
+        <section class="cartao cartao-vidro">
+          <h2 class="rotulo-secao">Ficha técnica</h2>
+          <dl class="ficha" id="ficha"></dl>
+        </section>
+
+        <section class="cartao cartao-vidro">
+          <h2 class="rotulo-secao">Estatísticas</h2>
+          <div class="numeros-quiz" id="numeros"></div>
+        </section>
+
+        <section class="cartao cartao-vidro escondido" id="cartao-do-autor">
+          <h2 class="rotulo-secao">Criado por</h2>
+          <a class="autor-pagina" id="autor"></a>
+        </section>
+      </aside>
+    </div>
+
+    <!-- Recomendações: quizzes do catálogo com mais em comum com este. -->
+    <section class="recomendados escondido" id="recomendados">
+      <h2 class="titulo-secao-catalogo">Você também pode gostar</h2>
+      <div class="grade-recomendados" id="grade-recomendados"></div>
+    </section>
+  </div>
+
+<script type="module">
+// ============================================================
+// A página de um quiz
+//
+// Antes, clicar num quiz do catálogo caía direto na tela de EDIÇÃO
+// (só que travada, para quem não era o dono). Esta página é a
+// vitrine: o que é o quiz, quem fez, quanto já foi jogado — e,
+// logo abaixo, montar a partida e abrir a sala.
+//
+// O servidor já separa o que cada um pode ver (GET /api/quizzes/:id):
+// visitante recebe as perguntas SEM o gabarito. Daqui só usamos
+// quantas são e quanto tempo têm — nenhum enunciado vai para a
+// tela, para ninguém ler as perguntas antes de jogar.
+// ============================================================
+
+import { montarAvatar } from "./avatar.js";
+import { confirmarCopia } from "./confirmar.js";
+import { artePorCategoria, coresDaCategoria } from "./capas.js";
+
+const $ = (id) => document.getElementById(id);
+
+const MINIMO_PERGUNTAS = 10;
+const RESULTADO_S = 10;          // tela de resultado entre perguntas
+const SEGUNDOS_SUGERIDOS = 20;
+
+const CATEGORIAS = {
+  geral: "Geral", anime: "Anime", games: "Games", filmes: "Filmes",
+  musica: "Música", esportes: "Esportes", historia: "História",
+  ciencia: "Ciência", tecnologia: "Tecnologia", educacao: "Educação",
+  geografia: "Geografia", natureza: "Natureza", culinaria: "Culinária"
+};
+
+const SITUACOES = {
+  rascunho: "Rascunho", recusado: "Recusado", revisao: "Em revisão"
+};
+
+const quizId = Number(new URLSearchParams(location.search).get("id")) || null;
+let quiz = null;
+let sugestaoAtual = 0; // em minutos; null quando ajustado à mão
+
+function falhar(texto) {
+  $("erro-pagina").textContent = texto;
+  $("erro-pagina").classList.remove("escondido");
+}
+
+const numero = (n) => Number(n).toLocaleString("pt-BR");
+
+// ----- Carregar -----
+
+try {
+  if (!quizId) throw new Error("Quiz não encontrado");
+
+  const resposta = await fetch(`/api/quizzes/${quizId}`);
+  const dados = await resposta.json().catch(() => null);
+  if (!resposta.ok) throw new Error(dados?.erro ?? "Não consegui carregar o quiz.");
+
+  quiz = dados.quiz;
+
+  // O dono recebe também as perguntas bloqueadas (o editor precisa
+  // delas). Na partida só entram as ativas: é com elas que se conta.
+  quiz.perguntas = quiz.perguntas.filter((p) => p.ativa !== false);
+  desenhar();
+} catch (erro) {
+  falhar(erro.message === "Failed to fetch" ? "Não consegui falar com o servidor." : erro.message);
+}
+
+// ----- Desenhar -----
+
+function desenhar() {
+  document.title = `${quiz.titulo} — Quiz`;
+
+  const nomeCategoria = CATEGORIAS[quiz.categoria] ?? quiz.categoria;
+  const etiquetas = quiz.etiquetas ?? [];
+
+  // Capa e fundo. Tudo que é texto do quiz entra por textContent.
+  const [corFundo, corTraco] = coresDaCategoria(quiz.categoria);
+  $("fundo-quiz").style.background =
+    `radial-gradient(ellipse at 20% 0%, ${corFundo} 0%, transparent 60%),
+     radial-gradient(ellipse at 90% 10%, ${corTraco}33 0%, transparent 55%)`;
+
+  if (quiz.imagem_url) {
+    const foto = document.createElement("img");
+    foto.className = "foto-capa";
+    foto.src = quiz.imagem_url;
+    foto.alt = "";
+    foto.addEventListener("error", () => {
+      foto.remove();
+      $("capa").insertAdjacentHTML("afterbegin", artePorCategoria(quiz.categoria));
+    });
+    $("capa").append(foto);
+
+    const borrada = document.createElement("img");
+    borrada.src = quiz.imagem_url;
+    borrada.alt = "";
+    borrada.addEventListener("error", () => borrada.remove());
+    $("fundo-quiz").append(borrada);
+  } else {
+    $("capa").insertAdjacentHTML("beforeend", artePorCategoria(quiz.categoria));
+  }
+
+  if (quiz.imagem_credito) {
+    $("credito-capa").textContent = `Capa: ${quiz.imagem_credito}`;
+    $("credito-capa").classList.remove("escondido");
+  }
+
+  $("selo-principal").textContent = etiquetas[0] ?? nomeCategoria;
+
+  if (SITUACOES[quiz.situacao]) {
+    $("selo-situacao").textContent = SITUACOES[quiz.situacao];
+    $("selo-situacao").classList.remove("escondido");
+  }
+
+  // Nota: só quando alguém avaliou. "★ 0,0" diria que é ruim.
+  const nota = quiz.avaliacoes > 0 ? quiz.nota.toFixed(1).replace(".", ",") : null;
+  const total = quiz.perguntas.length;
+  $("linha-nota").textContent =
+    (nota ? `★ ${nota}  ·  ` : "") + `${total} pergunta${total === 1 ? "" : "s"}`;
+
+  $("titulo").textContent = quiz.titulo;
+  $("descricao").textContent = quiz.descricao || "Sem descrição.";
+
+  $("bloco-etiquetas").classList.toggle("escondido", etiquetas.length === 0);
+
+  for (const etiqueta of etiquetas) {
+    const chip = document.createElement("span");
+    chip.className = "etiqueta";
+    chip.textContent = etiqueta;
+    $("etiquetas").append(chip);
+  }
+
+  // Ficha técnica
+  const media = total ? Math.round(quiz.perguntas.reduce((s, p) => s + p.segundos, 0) / total) : 0;
+  const linhasDaFicha = [
+    ["Categoria", nomeCategoria],
+    ["Assunto", etiquetas[0] ?? "—"],
+    ["Perguntas", String(total)],
+    ["Tempo por pergunta", total ? `${media} s` : "—"],
+    ["Situação", quiz.situacao === "publicado" ? "No catálogo" : (SITUACOES[quiz.situacao] ?? quiz.situacao)],
+    ["Adicionado", new Date(quiz.criado_em).toLocaleDateString("pt-BR")]
+  ];
+
+  for (const [rotulo, valor] of linhasDaFicha) {
+    const dt = document.createElement("dt");
+    dt.textContent = rotulo;
+    const dd = document.createElement("dd");
+    dd.textContent = valor;
+    $("ficha").append(dt, dd);
+  }
+
+  // Estatísticas
+  const numeros = [
+    [nota ? `★ ${nota}` : "—", "nota"],
+    [numero(quiz.partidas), "acessos"],
+    [numero(quiz.avaliacoes), quiz.avaliacoes === 1 ? "avaliação" : "avaliações"]
+  ];
+
+  for (const [valor, rotulo] of numeros) {
+    const caixa = document.createElement("div");
+    caixa.className = "numero-quiz";
+    const forte = document.createElement("strong");
+    forte.textContent = valor;
+    const pequeno = document.createElement("span");
+    pequeno.textContent = rotulo;
+    caixa.append(forte, pequeno);
+    $("numeros").append(caixa);
+  }
+
+  // Autor (pode não existir mais: quiz do catálogo sobrevive à conta)
+  if (quiz.autor) {
+    const nome = document.createElement("span");
+    nome.textContent = quiz.meu ? `${quiz.autor} (você)` : quiz.autor;
+    $("autor").href = quiz.meu ? "perfil.html" : `perfil.html?id=${quiz.autor_id}`;
+    $("autor").append(montarAvatar(quiz.autor, "avatar", quiz.autor_foto, quiz.autor_cor), nome);
+    $("cartao-do-autor").classList.remove("escondido");
+  }
+
+  // Ações
+  if (quiz.meu) {
+    $("botao-editar").href = `editor.html?id=${quiz.id}`;
+    $("botao-editar").textContent = quiz.situacao === "publicado" ? "Gerenciar perguntas" : "Editar";
+    $("botao-editar").classList.remove("escondido");
+  } else {
+    $("link-denunciar").href = `index.html?denunciar=${quiz.id}`;
+    $("link-denunciar").classList.remove("escondido");
+  }
+
+  if (total < MINIMO_PERGUNTAS) {
+    $("botao-jogar").textContent = "Incompleto";
+    $("botao-jogar").disabled = true;
+  }
+
+  $("grade-quiz").classList.remove("escondido");
+  aplicarSugestao(0);
+  recomendar();
+}
+
+// ============================================================
+// Recomendações
+//
+// "Parecido" é ter etiquetas em comum — a principal pesa mais — e,
+// depois, a mesma categoria. Quem gostou de Naruto vê primeiro os
+// outros animes; se o assunto tiver poucos quizzes, a fileira se
+// completa com os mais acessados do catálogo.
+//
+// O catálogo já vem inteiro numa requisição (é o que a página
+// inicial usa), então a conta é feita aqui, sem rota nova.
+// ============================================================
+
+const MAX_RECOMENDADOS = 6;
+
+function afinidade(outro) {
+  const minhas = quiz.etiquetas ?? [];
+  const dele = outro.etiquetas ?? [];
+  let pontos = 0;
+
+  if (minhas[0] && minhas[0] === dele[0]) pontos += 4;
+  pontos += dele.filter((e) => minhas.includes(e)).length * 2;
+  if (outro.categoria === quiz.categoria) pontos += 3;
+
+  return pontos;
+}
+
+async function recomendar() {
+  try {
+    const resposta = await fetch("/api/quizzes");
+    if (!resposta.ok) return;
+    const { quizzes } = await resposta.json();
+
+    const lista = quizzes
+      .filter((q) => q.id !== quiz.id && q.perguntas >= MINIMO_PERGUNTAS)
+      .map((q) => ({ q, pontos: afinidade(q) }))
+      .sort((a, b) => b.pontos - a.pontos || b.q.partidas - a.q.partidas)
+      .slice(0, MAX_RECOMENDADOS);
+
+    if (lista.length === 0) return;
+
+    for (const { q } of lista) $("grade-recomendados").append(cartaoRecomendado(q));
+    $("recomendados").classList.remove("escondido");
+  } catch {
+    // Recomendação é um extra: se falhar, a página segue sem ela.
+  }
+}
+
+function cartaoRecomendado(q) {
+  const cartao = document.createElement("a");
+  cartao.className = "card-quiz card-recomendado";
+  cartao.href = `quiz.html?id=${q.id}`;
+
+  const capa = document.createElement("div");
+  capa.className = "capa";
+
+  if (q.imagem_url) {
+    const foto = document.createElement("img");
+    foto.className = "foto-capa";
+    foto.src = q.imagem_url;
+    foto.alt = "";
+    foto.loading = "lazy";
+    foto.addEventListener("error", () => {
+      foto.remove();
+      capa.insertAdjacentHTML("afterbegin", artePorCategoria(q.categoria));
+    });
+    capa.append(foto);
+  } else {
+    capa.insertAdjacentHTML("beforeend", artePorCategoria(q.categoria));
+  }
+
+  const selo = document.createElement("span");
+  selo.className = "selo-categoria";
+  selo.textContent = q.etiquetas?.[0] ?? CATEGORIAS[q.categoria] ?? q.categoria;
+
+  const selos = document.createElement("div");
+  selos.className = "selos-topo";
+  selos.style.justifyContent = "flex-end";
+  selos.append(selo);
+  capa.append(selos);
+
+  const titulo = document.createElement("h3");
+  titulo.className = "titulo-card";
+  titulo.textContent = q.titulo; // texto, nunca innerHTML
+  titulo.title = q.titulo;
+
+  const meta = document.createElement("div");
+  meta.className = "meta-card";
+  meta.textContent = `${q.perguntas} perguntas · ${numero(q.partidas)} acessos`;
+
+  cartao.append(capa, titulo, meta);
+  return cartao;
+}
+
+// ----- Duplicar -----
+
+$("botao-duplicar").addEventListener("click", async () => {
+  if (!(await confirmarCopia(quiz.titulo))) return;
+  $("botao-duplicar").disabled = true;
+
+  try {
+    const resposta = await fetch(`/api/quizzes/${quiz.id}/copia`, { method: "POST" });
+    const dados = await resposta.json().catch(() => null);
+
+    if (resposta.status === 401) throw new Error("Entre na sua conta (no catálogo) para duplicar e editar a sua cópia.");
+    if (!resposta.ok) throw new Error(dados?.erro ?? "Não consegui duplicar.");
+
+    location.href = `editor.html?id=${dados.quiz.id}&copia=1`;
+  } catch (erro) {
+    falhar(erro.message);
+    $("botao-duplicar").disabled = false;
+    scrollTo({ top: 0, behavior: "smooth" });
+  }
+});
+
+// ============================================================
+// Montar a partida
+//
+// A duração é uma ESTIMATIVA: quem passa para a próxima pergunta é
+// o apresentador. A conta usa 10 s de resultado por pergunta.
+// (A mesma lógica da página de edição — ver editor.html.)
+// ============================================================
+
+function formatarDuracao(segundosTotais) {
+  const minutos = Math.round(segundosTotais / 60);
+  if (minutos < 60) return `${Math.max(1, minutos)} min`;
+  const horas = Math.floor(minutos / 60);
+  const resto = minutos % 60;
+  return resto ? `${horas} h ${String(resto).padStart(2, "0")} min` : `${horas} h`;
+}
+
+function aplicarSugestao(minutos) {
+  sugestaoAtual = minutos;
+  const disponiveis = quiz.perguntas.length;
+  let aviso = "";
+
+  if (minutos === 0) {
+    $("partida-quantidade").value = disponiveis;
+    $("partida-segundos").value = "";
+  } else {
+    const alvo = minutos * 60;
+    const cabem = Math.floor(alvo / (SEGUNDOS_SUGERIDOS + RESULTADO_S));
+
+    if (cabem <= disponiveis) {
+      $("partida-quantidade").value = cabem;
+      $("partida-segundos").value = SEGUNDOS_SUGERIDOS;
+    } else {
+      const segundos = Math.min(300, Math.max(10, Math.round(alvo / Math.max(1, disponiveis) - RESULTADO_S)));
+      $("partida-quantidade").value = disponiveis;
+      $("partida-segundos").value = segundos;
+
+      const chega = disponiveis * (segundos + RESULTADO_S);
+      aviso = segundos === 300 && chega < alvo * 0.95
+        ? `O quiz tem ${disponiveis} perguntas: mesmo com 300 s (o máximo) cada uma, dá ≈ ${formatarDuracao(chega)}.`
+        : `O quiz tem ${disponiveis} perguntas, então cada uma fica com ${segundos} s para chegar a ${formatarDuracao(alvo)}.`;
+    }
+  }
+
+  for (const b of $("sugestoes-partida").children) {
+    b.classList.toggle("escolhida", Number(b.dataset.minutos) === minutos);
+  }
+
+  atualizarEstimativa(aviso);
+}
+
+/** Confere os campos e devolve { quantidade, segundos } ou { erro }. */
+function lerPartida() {
+  const disponiveis = quiz.perguntas.length;
+  const quantidade = Number($("partida-quantidade").value);
+  const texto = $("partida-segundos").value.trim();
+  const segundos = texto === "" ? null : Number(texto);
+
+  if (disponiveis < MINIMO_PERGUNTAS) {
+    return { erro: `O quiz precisa de pelo menos ${MINIMO_PERGUNTAS} perguntas para ser apresentado.` };
+  }
+  if (!Number.isInteger(quantidade) || quantidade < MINIMO_PERGUNTAS || quantidade > disponiveis) {
+    return { erro: `Escolha entre ${MINIMO_PERGUNTAS} e ${disponiveis} perguntas.` };
+  }
+  if (segundos !== null && (!Number.isInteger(segundos) || segundos < 10 || segundos > 300)) {
+    return { erro: "O tempo por pergunta vai de 10 a 300 segundos." };
+  }
+  return { quantidade, segundos, disponiveis };
+}
+
+function atualizarEstimativa(aviso = "") {
+  // Campo vazio = cada pergunta com o próprio tempo. Em vez de uma
+  // frase, o campo mostra QUAL é esse tempo (a média, quando variam).
+  if (quiz.perguntas.length > 0) {
+    const media = quiz.perguntas.reduce((soma, p) => soma + p.segundos, 0) / quiz.perguntas.length;
+    $("partida-segundos").placeholder = String(Math.round(media));
+  }
+
+  const leitura = lerPartida();
+
+  if (leitura.erro) {
+    $("partida-estimativa").textContent = leitura.erro;
+    $("partida-estimativa").classList.add("invalida");
+  } else {
+    const { quantidade, segundos, disponiveis } = leitura;
+    const media = quiz.perguntas.reduce((soma, p) => soma + p.segundos, 0) / disponiveis;
+
+    $("partida-estimativa").textContent =
+      `≈ ${formatarDuracao(quantidade * ((segundos ?? media) + RESULTADO_S))}` +
+      (segundos === null ? " (cada pergunta com o próprio tempo)" : "");
+    $("partida-estimativa").classList.remove("invalida");
+  }
+
+  $("partida-aviso").textContent = aviso;
+}
+
+$("sugestoes-partida").addEventListener("click", (evento) => {
+  const botao = evento.target.closest("button[data-minutos]");
+  if (botao && quiz) aplicarSugestao(Number(botao.dataset.minutos));
+});
+
+for (const id of ["partida-quantidade", "partida-segundos"]) {
+  $(id).addEventListener("input", () => {
+    sugestaoAtual = null;
+    for (const b of $("sugestoes-partida").children) b.classList.remove("escolhida");
+    atualizarEstimativa();
+  });
+}
+
+// Abrir sala, com o que estiver montado (por padrão, todas as
+// perguntas). Quem abre de fato — e pede a conta, se faltar — é o
+// catálogo; aqui só se monta o pedido.
+$("botao-jogar").addEventListener("click", () => {
+  const leitura = lerPartida();
+  if (leitura.erro) {
+    atualizarEstimativa();
+    $("montar").scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+
+  const parametros = new URLSearchParams({ apresentar: quiz.id });
+  if (leitura.quantidade < leitura.disponiveis) parametros.set("quantidade", leitura.quantidade);
+  if (leitura.segundos !== null) parametros.set("segundos", leitura.segundos);
+
+  location.href = `index.html?${parametros}`;
+});
+</script>
+</body>
+</html>

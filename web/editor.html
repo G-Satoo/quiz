@@ -52,47 +52,6 @@
       <p class="nota-analise" id="nota-analise">Costuma levar de 5 a 20 segundos.</p>
     </div>
 
-    <!--
-      Montar a partida. Mora AQUI, e não numa janela do catálogo, de
-      propósito: é nesta página que se bloqueia e acrescenta pergunta,
-      e a estimativa de duração acompanha cada mudança. E a sala só
-      abre quando se clica em Apresentar — uma vez, já do jeito certo,
-      sem ter que voltar e gerar outro código a cada ajuste.
-    -->
-    <div class="cartao cartao-partida" id="cartao-partida">
-      <div class="cabeca-partida">
-        <div>
-          <h2 style="margin:0">Montar a partida</h2>
-          <p class="dica-campo" style="margin:4px 0 0">
-            Escolha uma duração ou ajuste à mão. A sala abre quando você clicar em Apresentar.
-          </p>
-        </div>
-        <button type="button" id="botao-apresentar">▶ Apresentar</button>
-      </div>
-
-      <div class="sugestoes-partida" id="sugestoes-partida">
-        <button type="button" class="discreto" data-minutos="0">Todas</button>
-        <button type="button" class="discreto" data-minutos="30">30 min</button>
-        <button type="button" class="discreto" data-minutos="60">1 hora</button>
-        <button type="button" class="discreto" data-minutos="120">2 horas</button>
-      </div>
-
-      <div class="campos-partida">
-        <div>
-          <label for="partida-quantidade">Perguntas</label>
-          <input id="partida-quantidade" type="number" inputmode="numeric" min="10" step="1">
-        </div>
-        <div>
-          <label for="partida-segundos">Segundos por pergunta</label>
-          <input id="partida-segundos" type="number" inputmode="numeric" min="10" max="300" step="1"
-                 placeholder="o de cada uma">
-        </div>
-      </div>
-
-      <p class="estimativa-partida" id="partida-estimativa"></p>
-      <p class="aviso-partida" id="partida-aviso"></p>
-    </div>
-
     <div class="cartao" style="margin-bottom:26px">
       <label for="titulo">Título do quiz</label>
       <input id="titulo" maxlength="140" placeholder="Ex.: Conhecimentos gerais" required>
@@ -113,12 +72,10 @@
             <button type="button" class="discreto" id="botao-escolher-capa">Escolher imagem</button>
             <button type="button" class="discreto escondido" id="botao-remover-capa">Remover</button>
           </div>
-          <p class="dica-campo">
-            Qualquer foto serve: ela é recortada em <strong>3:4</strong> e reduzida para
-            <strong>600×800</strong> aqui mesmo, antes de enviar. PNG, JPEG ou WEBP.
-            Use imagem que você tenha direito de usar — ela passa pela moderação junto
-            com as perguntas.
-          </p>
+          <!-- A foto é recortada em 3:4 e reduzida para 600x800 aqui
+               mesmo, antes de enviar, e passa pela moderação junto com
+               as perguntas. Quem usa só precisa saber o que pode mandar. -->
+          <p class="dica-campo">PNG, JPEG ou WEBP. Use uma imagem que você tenha direito de usar.</p>
           <p class="credito-capa" id="credito-capa"></p>
         </div>
       </div>
@@ -133,9 +90,9 @@
           <!-- Não é escolha do autor: a IA define pelo conteúdo (uma
                sugestão ao gerar, a definitiva na aprovação). Assim
                ninguém põe um quiz de futebol em "Anime". -->
-          <label>Categoria</label>
+          <label>Categoria e etiquetas</label>
           <div class="categoria-automatica" id="rotulo-categoria"
-               title="Definida pela IA a partir das perguntas, na aprovação">Geral</div>
+               title="Definidas pela IA a partir das perguntas, na aprovação">Geral</div>
           <input type="hidden" id="categoria" value="geral">
         </div>
       </div>
@@ -201,8 +158,11 @@
       + Adicionar pergunta
     </button>
 
+    <!-- Aqui se EDITA. Montar a partida e abrir a sala é na página
+         do quiz (quiz.html): o botão ao lado salva e leva para lá. -->
     <div class="rodape-editor">
       <button id="botao-salvar">Salvar quiz</button>
+      <button type="button" class="discreto escondido" id="botao-pagina-quiz">Ir para a página do quiz →</button>
     </div>
   </div>
 
@@ -333,20 +293,22 @@ let perguntas = [];
  */
 let travado = false;
 
-// Quiz de outra pessoa: a página serve para montar a partida e
-// apresentar, não para editar. Quem quiser mudar duplica.
+// Quiz de outra pessoa: aqui não se edita. Quem chega por um link
+// antigo é levado à página do quiz; quem quiser mudar duplica.
 let somenteLeitura = false;
 let autor = null;
 
 const NOMES_CATEGORIA = {
   geral: "Geral", anime: "Anime", games: "Games", filmes: "Filmes",
   musica: "Música", esportes: "Esportes", historia: "História",
-  ciencia: "Ciência", tecnologia: "Tecnologia", educacao: "Educação"
+  ciencia: "Ciência", tecnologia: "Tecnologia", educacao: "Educação",
+  geografia: "Geografia", natureza: "Natureza", culinaria: "Culinária"
 };
 
-function mostrarCategoria(categoria) {
+function mostrarCategoria(categoria, etiquetas = []) {
   $("categoria").value = categoria;
-  $("rotulo-categoria").textContent = NOMES_CATEGORIA[categoria] ?? categoria;
+  $("rotulo-categoria").textContent =
+    [NOMES_CATEGORIA[categoria] ?? categoria, ...etiquetas].join(" · ");
 }
 
 // O tema do quiz: definido na primeira geração e fixo dali em diante
@@ -360,12 +322,6 @@ function travarTema(tema) {
   $("tema").title = "O tema deste quiz não muda";
   $("dica-tema").classList.remove("escondido");
 }
-
-// Montar a partida. Declarados aqui em cima porque o desenho das
-// perguntas, que roda já no carregamento, atualiza a estimativa.
-const RESULTADO_S = 10;          // tela de resultado entre perguntas
-const SEGUNDOS_SUGERIDOS = 20;
-let sugestaoAtual = 0;           // em minutos; null quando ajustado à mão
 
 // ----- Capa -----
 //
@@ -581,7 +537,7 @@ function aplicarTrava() {
     : situacao === "publicado" ? "Este quiz está no catálogo." : "Este quiz já foi apresentado.";
 
   $("detalhe-trava").textContent = somenteLeitura
-    ? "Você pode montar a partida e apresentar. Para mudar o conteúdo, duplique o quiz pelo catálogo — a cópia é sua."
+    ? "Para mudar o conteúdo, duplique o quiz pelo catálogo — a cópia é sua."
     : "Perguntas, título e capa ficam como estão — você pode bloquear uma pergunta que não queira mais usar, " +
       "e isso vale na hora. Para mudar o conteúdo, duplique o quiz pelo catálogo ou pelo seu perfil: " +
       "a cópia é sua e passa pela aprovação de novo.";
@@ -649,7 +605,7 @@ if (quizId) {
 
     $("titulo").value = quiz.titulo;
     $("descricao").value = quiz.descricao ?? "";
-    mostrarCategoria(quiz.categoria ?? "geral");
+    mostrarCategoria(quiz.categoria ?? "geral", quiz.etiquetas ?? []);
     mostrarPrevia(quiz.imagem_url ?? null);
     if (quiz.imagem_credito) $("credito-capa").textContent = `Imagem: ${quiz.imagem_credito}`;
 
@@ -657,6 +613,10 @@ if (quizId) {
     motivoSituacao = quiz.moderacao_motivo ?? null;
 
     somenteLeitura = quiz.meu !== true;
+
+    // Quiz dos outros não tem o que fazer no editor: a página do
+    // quiz é o lugar de ver, montar a partida e abrir a sala.
+    if (somenteLeitura) location.replace(`quiz.html?id=${quizId}`);
     autor = quiz.autor ?? null;
     if (quiz.tema) travarTema(quiz.tema);
 
@@ -672,8 +632,8 @@ if (quizId) {
     if (parametros.get("copia") === "1") {
       history.replaceState(null, "", `editor.html?id=${quizId}`);
       $("aviso-salvo").innerHTML =
-        "<strong>Cópia criada.</strong> Ela é sua: edite à vontade, monte a partida aqui em " +
-        "cima e apresente numa sala privada, ou envie para aprovação para ir ao catálogo.";
+        "<strong>Cópia criada.</strong> Ela é sua: edite à vontade e envie para aprovação para " +
+        "ir ao catálogo. Para jogar numa sala privada, vá para a página do quiz.";
       $("aviso-salvo").classList.remove("escondido");
     }
   } catch (erro) {
@@ -684,7 +644,6 @@ if (quizId) {
 }
 
 desenhar();
-aplicarSugestao(0);
 
 // ============================================================
 // Desenho
@@ -726,7 +685,6 @@ function desenhar() {
   $("botao-adicionar").disabled = ativas >= MAXIMO_PERGUNTAS;
 
   marcarRepetidas();
-  atualizarPartida();
 }
 
 function desenharPergunta(pergunta, indice) {
@@ -1202,6 +1160,7 @@ async function salvar({ avisar = true } = {}) {
       });
 
       quizId = quiz.id;
+      mostrarLinkDaPagina();
 
       // Troca a URL sem recarregar: a partir daqui a página edita
       // um quiz que existe, e recarregar não deve criar outro.
@@ -1341,168 +1300,30 @@ $("botao-publicar").addEventListener("click", async () => {
 });
 
 // ============================================================
-// Montar a partida e apresentar
+// Ir para a página do quiz
 //
-// A duração é uma ESTIMATIVA: quem passa para a próxima pergunta é
-// o apresentador, e a tela de resultado demora o que ele quiser. A
-// conta usa 10 s de resultado por pergunta, e a tela diz "≈".
+// Montar a partida e abrir a sala é lá (quiz.html), não aqui: esta
+// tela é só para editar. O botão salva o que mudou antes de sair,
+// para a página do quiz mostrar o que está na tela.
 // ============================================================
 
-function ativasAgora() {
-  return perguntas.filter((p) => p.ativa !== false);
+function mostrarLinkDaPagina() {
+  $("botao-pagina-quiz").classList.toggle("escondido", !quizId);
 }
 
-function formatarDuracao(segundosTotais) {
-  const minutos = Math.round(segundosTotais / 60);
-  if (minutos < 60) return `${Math.max(1, minutos)} min`;
-  const horas = Math.floor(minutos / 60);
-  const resto = minutos % 60;
-  return resto ? `${horas} h ${String(resto).padStart(2, "0")} min` : `${horas} h`;
-}
-
-/**
- * Preenche os campos a partir de uma duração.
- *
- * 0 = todas as perguntas, cada uma com o próprio tempo. As outras
- * contam 20 s de pergunta + 10 s de resultado: com perguntas de
- * sobra, sorteia quantas cabem; com perguntas de menos, usa todas e
- * estica o tempo de cada uma (até o máximo de 300 s).
- */
-function aplicarSugestao(minutos) {
-  sugestaoAtual = minutos;
-  const disponiveis = ativasAgora().length;
-  let aviso = "";
-
-  if (minutos === 0) {
-    $("partida-quantidade").value = disponiveis;
-    $("partida-segundos").value = "";
-  } else {
-    const alvo = minutos * 60;
-    const cabem = Math.floor(alvo / (SEGUNDOS_SUGERIDOS + RESULTADO_S));
-
-    if (cabem <= disponiveis) {
-      $("partida-quantidade").value = cabem;
-      $("partida-segundos").value = SEGUNDOS_SUGERIDOS;
-    } else {
-      const segundos = Math.min(300, Math.max(10, Math.round(alvo / Math.max(1, disponiveis) - RESULTADO_S)));
-      $("partida-quantidade").value = disponiveis;
-      $("partida-segundos").value = segundos;
-
-      const chega = disponiveis * (segundos + RESULTADO_S);
-      aviso = segundos === 300 && chega < alvo * 0.95
-        ? `O quiz tem ${disponiveis} perguntas: mesmo com 300 s (o máximo) cada uma, dá ≈ ${formatarDuracao(chega)}.`
-        : `O quiz tem ${disponiveis} perguntas, então cada uma fica com ${segundos} s para chegar a ${formatarDuracao(alvo)}.`;
-    }
-  }
-
-  for (const b of $("sugestoes-partida").children) {
-    b.classList.toggle("escolhida", Number(b.dataset.minutos) === minutos);
-  }
-
-  atualizarEstimativa(aviso);
-}
-
-/**
- * Chamado sempre que as perguntas mudam. Com uma sugestão escolhida,
- * refaz a conta (bloquear uma pergunta muda "Todas"); ajustado à mão,
- * só recalcula a estimativa.
- */
-function atualizarPartida() {
-  if (!$("partida-quantidade")) return;
-  if (sugestaoAtual !== null) aplicarSugestao(sugestaoAtual);
-  else atualizarEstimativa();
-}
-
-/** Confere os campos e devolve { quantidade, segundos } ou { erro }. */
-function lerPartida() {
-  const disponiveis = ativasAgora().length;
-  const quantidade = Number($("partida-quantidade").value);
-  const texto = $("partida-segundos").value.trim();
-  const segundos = texto === "" ? null : Number(texto);
-
-  if (disponiveis < MINIMO_PERGUNTAS) {
-    return { erro: `O quiz precisa de pelo menos ${MINIMO_PERGUNTAS} perguntas ativas para apresentar.` };
-  }
-  if (!Number.isInteger(quantidade) || quantidade < MINIMO_PERGUNTAS || quantidade > disponiveis) {
-    return { erro: `Escolha entre ${MINIMO_PERGUNTAS} e ${disponiveis} perguntas.` };
-  }
-  if (segundos !== null && (!Number.isInteger(segundos) || segundos < 10 || segundos > 300)) {
-    return { erro: "O tempo por pergunta vai de 10 a 300 segundos." };
-  }
-  return { quantidade, segundos, disponiveis };
-}
-
-function atualizarEstimativa(aviso = "") {
-  const leitura = lerPartida();
-
-  if (leitura.erro) {
-    $("partida-estimativa").textContent = leitura.erro;
-    $("partida-estimativa").classList.add("invalida");
-  } else {
-    const { quantidade, segundos, disponiveis } = leitura;
-
-    // Com o tempo de cada uma, a conta usa os tempos de verdade:
-    // a média das ativas, vezes quantas vão entrar.
-    const media = ativasAgora().reduce((soma, p) => soma + p.segundos, 0) / disponiveis;
-    const porPergunta = (segundos ?? media) + RESULTADO_S;
-
-    $("partida-estimativa").textContent =
-      `≈ ${formatarDuracao(quantidade * porPergunta)}` +
-      (segundos === null ? " (cada pergunta com o próprio tempo)" : "");
-    $("partida-estimativa").classList.remove("invalida");
-  }
-
-  $("partida-aviso").textContent = aviso;
-}
-
-$("sugestoes-partida").addEventListener("click", (evento) => {
-  const botao = evento.target.closest("button[data-minutos]");
-  if (botao) aplicarSugestao(Number(botao.dataset.minutos));
-});
-
-// Mexer num campo tira o destaque da sugestão: a partida passou a
-// ser sua, não mais a sugerida.
-for (const id of ["partida-quantidade", "partida-segundos"]) {
-  $(id).addEventListener("input", () => {
-    sugestaoAtual = null;
-    for (const b of $("sugestoes-partida").children) b.classList.remove("escolhida");
-    atualizarEstimativa();
-  });
-}
-
-// Trocar o tempo de uma pergunta muda a estimativa sem redesenhar.
-$("perguntas").addEventListener("input", () => atualizarPartida());
-
-/**
- * Apresentar: salva o que mudou e abre a sala, já com a partida
- * montada. É a única porta para abrir sala — uma vez, do jeito
- * certo, sem gerar um código novo a cada ajuste.
- */
-async function apresentar(botao) {
-  limparErro();
+$("botao-pagina-quiz").addEventListener("click", async () => {
+  const botao = $("botao-pagina-quiz");
   botao.disabled = true;
 
   try {
-    // O dono pode ter mexido nas perguntas: a sala precisa do que
-    // está na tela, não da última versão salva.
     if (!travado && !(await salvar({ avisar: false }))) return;
-    if (!quizId) return;
-
-    const leitura = lerPartida();
-    if (leitura.erro) return mostrarErro(leitura.erro);
-
-    const parametros = new URLSearchParams({ apresentar: quizId });
-    if (leitura.quantidade < leitura.disponiveis) parametros.set("quantidade", leitura.quantidade);
-    if (leitura.segundos !== null) parametros.set("segundos", leitura.segundos);
-
-    location.href = `index.html?${parametros}`;
+    if (quizId) location.href = `quiz.html?id=${quizId}`;
   } finally {
     botao.disabled = false;
   }
-}
+});
 
-$("botao-apresentar").addEventListener("click", () => apresentar($("botao-apresentar")));
-
+mostrarLinkDaPagina();
 </script>
 </body>
 </html>

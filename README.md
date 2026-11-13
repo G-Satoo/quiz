@@ -5,7 +5,7 @@ entram pelo celular com um código, e as perguntas aparecem para
 todo mundo ao mesmo tempo — com cronômetro e placar atualizando em
 tempo real.
 
-`Node 22` · `PostgreSQL 16` · `Redis 7` · `WebSocket` · `Docker Compose` · `Playwright` · `217 testes`
+`Node 22` · `PostgreSQL 16` · `Redis 7` · `WebSocket` · `Docker Compose` · `Playwright` · `225 testes`
 
 ![testes](https://github.com/G-Satoo/quiz/actions/workflows/testes.yml/badge.svg)
 
@@ -290,7 +290,8 @@ etapa de build:
 | página | para quem |
 |---|---|
 | `/` | o catálogo; e, para quem apresenta, o telão da partida |
-| `/editor.html` | criar e editar o quiz, gerar com IA e montar a partida |
+| `/quiz.html` | a página de um quiz: sobre, ficha, recomendações, montar a partida e abrir a sala |
+| `/editor.html` | criar e editar o quiz e gerar perguntas com IA |
 | `/jogar.html` | quem joga: código, apelido e as respostas |
 | `/perfil.html` | o seu perfil (ou o público, com `?id=`) |
 | `/moderacao.html` | a fila do administrador |

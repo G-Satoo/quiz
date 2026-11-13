@@ -1587,6 +1587,59 @@ describe("categoria automática", () => {
   });
 });
 
+describe("descrição", () => {
+  it("recusa descrição maior que o limite, ao criar e ao editar", async () => {
+    const longa = "x".repeat(301);
+
+    const criar = await cliente.post("/api/quizzes", { titulo: "Longo", descricao: longa, perguntas: completar([pergunta()]) });
+    assert.equal(criar.status, 400);
+
+    const { dados } = await cliente.post("/api/quizzes", {
+      titulo: "No limite", descricao: "x".repeat(300), perguntas: completar([pergunta()])
+    });
+    const editar = await cliente.patch(`/api/quizzes/${dados.quiz.id}`, { descricao: longa });
+    assert.equal(editar.status, 400);
+  });
+});
+
+describe("etiquetas", () => {
+  it("a aprovação grava as etiquetas, a principal primeiro, e o catálogo as devolve", async () => {
+    const { dados } = await cliente.post("/api/quizzes", {
+      titulo: "Fórmula 1",
+      perguntas: completar([pergunta("[assunto:esportes] [etiquetas:Corrida,automobilismo,carros] Quem venceu em 1991?")])
+    });
+
+    await publicar(dados.quiz);
+
+    const { dados: lido } = await cliente.get(`/api/quizzes/${dados.quiz.id}`);
+    assert.equal(lido.quiz.categoria, "esportes");
+    assert.deepEqual(lido.quiz.etiquetas, ["corrida", "automobilismo", "carros"]);
+
+    const { dados: catalogo } = await cliente.get("/api/quizzes");
+    const noCatalogo = catalogo.quizzes.find((q) => q.id === dados.quiz.id);
+    assert.equal(noCatalogo.etiquetas[0], "corrida");
+  });
+
+  it("quiz sem etiqueta fica com a lista vazia (a capa mostra a categoria)", async () => {
+    const { dados } = await cliente.post("/api/quizzes", { titulo: "Sem etiqueta", perguntas: completar([pergunta()]) });
+    await publicar(dados.quiz);
+
+    const { dados: lido } = await cliente.get(`/api/quizzes/${dados.quiz.id}`);
+    assert.deepEqual(lido.quiz.etiquetas, []);
+  });
+
+  it("o autor não escolhe as etiquetas: o que ele manda é ignorado", async () => {
+    const { dados } = await cliente.post("/api/quizzes", {
+      titulo: "Tentativa",
+      etiquetas: ["popular", "melhor quiz"],
+      perguntas: completar([pergunta()])
+    });
+
+    const { dados: lido } = await cliente.get(`/api/quizzes/${dados.quiz.id}`);
+    assert.deepEqual(lido.quiz.etiquetas, []);
+  });
+});
+
 describe("recuperar senha", () => {
   /** Pede o link e devolve o token que o servidor escreveu no log. */
   async function pedirLink(email) {

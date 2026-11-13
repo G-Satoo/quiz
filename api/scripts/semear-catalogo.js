@@ -32,6 +32,7 @@
 import "dotenv/config";
 
 import { pool } from "../db/pool.js";
+import { aplicarCapasDoCatalogo } from "../db/capas/aplicar.js";
 import { gerarHash } from "../src/servicos/senha.js";
 import { pontosDoAcerto } from "../src/tempo-real/pontuacao.js";
 
@@ -44,7 +45,8 @@ const SENHA = "demo12345";
 const CATALOGO = [
   // ---------------- geral ----------------
   {
-    titulo: "Capitais do mundo", categoria: "geral",
+    titulo: "Capitais do mundo", categoria: "geografia",
+    etiquetas: ["países", "capitais", "mapa"],
     descricao: "Da Oceania às Américas: você sabe onde fica o governo?",
     perguntas: [
       ["Qual é a capital da Austrália?", ["Camberra", "Sydney", "Melbourne", "Perth"]],
@@ -60,7 +62,8 @@ const CATALOGO = [
     ]
   },
   {
-    titulo: "Culinária brasileira", categoria: "geral",
+    titulo: "Culinária brasileira", categoria: "culinaria",
+    etiquetas: ["comida", "brasil", "receitas"],
     descricao: "Pratos típicos de norte a sul do país.",
     perguntas: [
       ["Qual prato leva feijão-preto e carnes de porco?", ["Feijoada", "Moqueca", "Baião de dois", "Vatapá"]],
@@ -76,7 +79,8 @@ const CATALOGO = [
     ]
   },
   {
-    titulo: "Reino animal", categoria: "geral",
+    titulo: "Reino animal", categoria: "natureza",
+    etiquetas: ["animais", "biologia", "curiosidades"],
     descricao: "Recordes e curiosidades da natureza.",
     perguntas: [
       ["Qual é o maior mamífero do planeta?", ["Baleia-azul", "Elefante-africano", "Cachalote", "Girafa"]],
@@ -95,6 +99,7 @@ const CATALOGO = [
   // ---------------- anime ----------------
   {
     titulo: "Naruto", categoria: "anime",
+    etiquetas: ["anime", "mangá", "ninja"],
     descricao: "O ninja cabeça-dura da Vila da Folha.",
     perguntas: [
       ["Qual é o sobrenome de Naruto?", ["Uzumaki", "Uchiha", "Hatake", "Hyuga"]],
@@ -111,6 +116,7 @@ const CATALOGO = [
   },
   {
     titulo: "One Piece", categoria: "anime",
+    etiquetas: ["anime", "mangá", "piratas"],
     descricao: "A tripulação do Chapéu de Palha atrás do grande tesouro.",
     perguntas: [
       ["Qual é o sonho de Luffy?", ["Tornar-se o Rei dos Piratas", "Ser almirante da Marinha", "Achar o All Blue", "Desenhar o mapa do mundo"]],
@@ -127,6 +133,7 @@ const CATALOGO = [
   },
   {
     titulo: "Dragon Ball", categoria: "anime",
+    etiquetas: ["anime", "mangá", "luta"],
     descricao: "Saiyajins, esferas do dragão e muito ki.",
     perguntas: [
       ["De que planeta Goku é originário?", ["Vegeta", "Namekusei", "Terra", "Yardrat"]],
@@ -145,6 +152,7 @@ const CATALOGO = [
   // ---------------- games ----------------
   {
     titulo: "Pokémon", categoria: "games",
+    etiquetas: ["nintendo", "rpg", "monstrinhos"],
     descricao: "Temos que pegar! Mas quanto você sabe?",
     perguntas: [
       ["Qual é o primeiro Pokémon de Ash no anime?", ["Pikachu", "Charmander", "Bulbasaur", "Squirtle"]],
@@ -161,6 +169,7 @@ const CATALOGO = [
   },
   {
     titulo: "Minecraft", categoria: "games",
+    etiquetas: ["games", "sobrevivência", "construção"],
     descricao: "Blocos, creepers e o End.",
     perguntas: [
       ["De que bloco é feito o portal do Nether?", ["Obsidiana", "Pedra", "Diamante", "Ferro"]],
@@ -177,6 +186,7 @@ const CATALOGO = [
   },
   {
     titulo: "Super Mario", categoria: "games",
+    etiquetas: ["nintendo", "plataforma", "clássicos"],
     descricao: "O encanador mais famoso dos videogames.",
     perguntas: [
       ["Qual é a profissão do Mario?", ["Encanador", "Carpinteiro", "Eletricista", "Pedreiro"]],
@@ -195,6 +205,7 @@ const CATALOGO = [
   // ---------------- filmes ----------------
   {
     titulo: "Harry Potter", categoria: "filmes",
+    etiquetas: ["fantasia", "magia", "livros"],
     descricao: "Hogwarts, feitiços e o menino que sobreviveu.",
     perguntas: [
       ["Em que casa de Hogwarts Harry fica?", ["Grifinória", "Sonserina", "Corvinal", "Lufa-Lufa"]],
@@ -211,6 +222,7 @@ const CATALOGO = [
   },
   {
     titulo: "Star Wars", categoria: "filmes",
+    etiquetas: ["sci-fi", "espaço", "saga"],
     descricao: "Há muito tempo, numa galáxia muito, muito distante...",
     perguntas: [
       ["Quem é o pai de Luke Skywalker?", ["Darth Vader", "Obi-Wan Kenobi", "Han Solo", "Imperador Palpatine"]],
@@ -227,6 +239,7 @@ const CATALOGO = [
   },
   {
     titulo: "Universo Marvel", categoria: "filmes",
+    etiquetas: ["super-heróis", "quadrinhos", "saga"],
     descricao: "Vingadores, joias do infinito e muito mais.",
     perguntas: [
       ["Qual é a identidade do Homem de Ferro?", ["Tony Stark", "Steve Rogers", "Bruce Banner", "Peter Parker"]],
@@ -245,6 +258,7 @@ const CATALOGO = [
   // ---------------- musica ----------------
   {
     titulo: "The Beatles", categoria: "musica",
+    etiquetas: ["rock", "banda", "anos 60"],
     descricao: "Os quatro garotos de Liverpool.",
     perguntas: [
       ["De que cidade são os Beatles?", ["Liverpool", "Londres", "Manchester", "Dublin"]],
@@ -261,6 +275,7 @@ const CATALOGO = [
   },
   {
     titulo: "MPB", categoria: "musica",
+    etiquetas: ["mpb", "música brasileira", "cantores"],
     descricao: "Bossa nova, Tropicália e os grandes da música brasileira.",
     perguntas: [
       ["Quem compôs \"Garota de Ipanema\"?", ["Tom Jobim e Vinicius de Moraes", "Caetano Veloso e Gilberto Gil", "Chico Buarque e Toquinho", "João Gilberto e Carlos Lyra"]],
@@ -277,6 +292,7 @@ const CATALOGO = [
   },
   {
     titulo: "Rock nacional", categoria: "musica",
+    etiquetas: ["rock", "banda", "brasil"],
     descricao: "As bandas que marcaram os anos 80.",
     perguntas: [
       ["Quem era o vocalista da Legião Urbana?", ["Renato Russo", "Cazuza", "Herbert Vianna", "Dinho Ouro Preto"]],
@@ -295,6 +311,7 @@ const CATALOGO = [
   // ---------------- esportes ----------------
   {
     titulo: "Copa do Mundo", categoria: "esportes",
+    etiquetas: ["futebol", "seleções", "torneio"],
     descricao: "A história do maior torneio do futebol.",
     perguntas: [
       ["Quantas Copas do Mundo o Brasil já ganhou?", ["5", "4", "6", "3"]],
@@ -311,6 +328,7 @@ const CATALOGO = [
   },
   {
     titulo: "Fórmula 1", categoria: "esportes",
+    etiquetas: ["corrida", "automobilismo", "carros"],
     descricao: "Velocidade, pit stops e lendas das pistas.",
     perguntas: [
       ["Que brasileiro foi campeão mundial em 1988, 1990 e 1991?", ["Ayrton Senna", "Nelson Piquet", "Emerson Fittipaldi", "Rubens Barrichello"]],
@@ -327,6 +345,7 @@ const CATALOGO = [
   },
   {
     titulo: "NBA", categoria: "esportes",
+    etiquetas: ["basquete", "liga", "estados unidos"],
     descricao: "O basquete da liga americana.",
     perguntas: [
       ["Em que time Michael Jordan conquistou seus seis títulos?", ["Chicago Bulls", "Los Angeles Lakers", "Boston Celtics", "Washington Wizards"]],
@@ -345,6 +364,7 @@ const CATALOGO = [
   // ---------------- historia ----------------
   {
     titulo: "Brasil Império", categoria: "historia",
+    etiquetas: ["brasil", "monarquia", "século 19"],
     descricao: "Da Independência à República.",
     perguntas: [
       ["Em que ano o Brasil declarou a independência?", ["1822", "1808", "1889", "1831"]],
@@ -361,6 +381,7 @@ const CATALOGO = [
   },
   {
     titulo: "Segunda Guerra Mundial", categoria: "historia",
+    etiquetas: ["guerra", "século 20", "europa"],
     descricao: "O conflito que mudou o século XX.",
     perguntas: [
       ["Em que ano começou a Segunda Guerra?", ["1939", "1914", "1941", "1945"]],
@@ -377,6 +398,7 @@ const CATALOGO = [
   },
   {
     titulo: "Egito Antigo", categoria: "historia",
+    etiquetas: ["antiguidade", "faraós", "civilizações"],
     descricao: "Faraós, pirâmides e hieróglifos.",
     perguntas: [
       ["Que rio sustentou a civilização egípcia?", ["Nilo", "Tigre", "Eufrates", "Jordão"]],
@@ -395,6 +417,7 @@ const CATALOGO = [
   // ---------------- ciencia ----------------
   {
     titulo: "Sistema Solar", categoria: "ciencia",
+    etiquetas: ["espaço", "astronomia", "planetas"],
     descricao: "Planetas, órbitas e o nosso cantinho do universo.",
     perguntas: [
       ["Qual é o maior planeta do Sistema Solar?", ["Júpiter", "Saturno", "Netuno", "Terra"]],
@@ -411,6 +434,7 @@ const CATALOGO = [
   },
   {
     titulo: "Corpo humano", categoria: "ciencia",
+    etiquetas: ["biologia", "anatomia", "saúde"],
     descricao: "Ossos, órgãos e células.",
     perguntas: [
       ["Qual é o maior órgão do corpo humano?", ["Pele", "Fígado", "Pulmão", "Intestino"]],
@@ -427,6 +451,7 @@ const CATALOGO = [
   },
   {
     titulo: "Química básica", categoria: "ciencia",
+    etiquetas: ["química", "elementos", "escola"],
     descricao: "Elementos, símbolos e a tabela periódica.",
     perguntas: [
       ["Qual é o símbolo químico do ouro?", ["Au", "Ag", "Or", "Go"]],
@@ -445,6 +470,7 @@ const CATALOGO = [
   // ---------------- tecnologia ----------------
   {
     titulo: "JavaScript", categoria: "tecnologia",
+    etiquetas: ["programação", "web", "linguagem"],
     descricao: "As pegadinhas da linguagem da web.",
     perguntas: [
       ["Quanto vale typeof null?", ["\"object\"", "\"null\"", "\"undefined\"", "\"number\""]],
@@ -461,6 +487,7 @@ const CATALOGO = [
   },
   {
     titulo: "Como a internet funciona", categoria: "tecnologia",
+    etiquetas: ["internet", "redes", "web"],
     descricao: "HTTP, DNS e o que acontece quando você digita um endereço.",
     perguntas: [
       ["O que significa a sigla HTTP?", ["HyperText Transfer Protocol", "High Transfer Text Protocol", "HyperText Transmission Program", "Host Text Transfer Protocol"]],
@@ -477,6 +504,7 @@ const CATALOGO = [
   },
   {
     titulo: "Git", categoria: "tecnologia",
+    etiquetas: ["programação", "versionamento", "ferramentas"],
     descricao: "Commits, branches e push.",
     perguntas: [
       ["Que comando grava as mudanças preparadas no histórico?", ["git commit", "git save", "git add", "git store"]],
@@ -495,6 +523,7 @@ const CATALOGO = [
   // ---------------- educacao ----------------
   {
     titulo: "Gramática portuguesa", categoria: "educacao",
+    etiquetas: ["português", "gramática", "escola"],
     descricao: "Plural, crase e ortografia.",
     perguntas: [
       ["Qual é o plural de \"cidadão\"?", ["Cidadãos", "Cidadões", "Cidadães", "Cidadãoes"]],
@@ -511,6 +540,7 @@ const CATALOGO = [
   },
   {
     titulo: "Matemática básica", categoria: "educacao",
+    etiquetas: ["matemática", "contas", "escola"],
     descricao: "Contas rápidas para aquecer o cérebro.",
     perguntas: [
       ["Quanto é 7 × 8?", ["56", "54", "63", "48"]],
@@ -526,7 +556,8 @@ const CATALOGO = [
     ]
   },
   {
-    titulo: "Geografia do Brasil", categoria: "educacao",
+    titulo: "Geografia do Brasil", categoria: "geografia",
+    etiquetas: ["brasil", "estados", "mapa"],
     descricao: "Estados, capitais e biomas.",
     perguntas: [
       ["Qual é o maior estado do Brasil em área?", ["Amazonas", "Pará", "Mato Grosso", "Minas Gerais"]],
@@ -646,10 +677,10 @@ async function semear() {
         // Publicados direto, sem passar pela IA: é conteúdo do
         // próprio projeto, escrito à mão. 'semente' no moderacao_por
         // deixa isso registrado.
-        `INSERT INTO quizzes (usuario_id, titulo, descricao, categoria, tema,
+        `INSERT INTO quizzes (usuario_id, titulo, descricao, categoria, tema, etiquetas,
                               situacao, moderacao_por, moderacao_em)
-         VALUES ($1, $2, $3, $4, $2, 'publicado', 'semente', now()) RETURNING id`,
-        [usuarioId, quiz.titulo, quiz.descricao, quiz.categoria]
+         VALUES ($1, $2, $3, $4, $2, $5, 'publicado', 'semente', now()) RETURNING id`,
+        [usuarioId, quiz.titulo, quiz.descricao, quiz.categoria, quiz.etiquetas]
       );
       const quizId = criados[0].id;
 
@@ -777,8 +808,12 @@ async function semear() {
       }
     }
 
+    // 5. As capas ilustradas (db/capas/), para os quizzes que têm.
+    const capas = await aplicarCapasDoCatalogo(cliente);
+
     await cliente.query("COMMIT");
 
+    console.log(`${capas} capa(s) ilustrada(s) aplicada(s).`);
     console.log(`Removidos ${removidos} quiz(zes) sem pergunta.`);
     console.log(`Criados ${CATALOGO.length} quizzes na conta ${EMAIL} (senha: ${SENHA}).`);
   } catch (erro) {

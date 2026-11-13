@@ -39,7 +39,10 @@ const PALETA = {
   historia:   ["#78350f", "#fbbf24"],
   ciencia:    ["#0f766e", "#2dd4bf"],
   tecnologia: ["#1e3a5f", "#38bdf8"],
-  educacao:   ["#581c87", "#c084fc"]
+  educacao:   ["#581c87", "#c084fc"],
+  geografia:  ["#134e4a", "#5eead4"],
+  natureza:   ["#365314", "#a3e635"],
+  culinaria:  ["#7f1d1d", "#fca5a5"]
 };
 
 /**
@@ -135,7 +138,30 @@ const DESENHOS = {
           fill="none" stroke="${c}" stroke-width="3.5" stroke-linejoin="round"/>
     <path d="M50 52 C58 46 70 46 80 50 v34 c-10 -4 -22 -4 -30 2 Z"
           fill="none" stroke="${c}" stroke-width="3.5" stroke-linejoin="round"/>
-    <path d="M50 52 v36" stroke="${c}" stroke-width="3" opacity=".6"/>`
+    <path d="M50 52 v36" stroke="${c}" stroke-width="3" opacity=".6"/>`,
+
+  // Globo: meridianos e paralelos.
+  geografia: (c) => `
+    <circle cx="50" cy="66" r="25" fill="none" stroke="${c}" stroke-width="3.5"/>
+    <ellipse cx="50" cy="66" rx="11" ry="25" fill="none" stroke="${c}" stroke-width="3" opacity=".7"/>
+    <path d="M25 66 h50 M29 53 h42 M29 79 h42"
+          stroke="${c}" stroke-width="3" opacity=".55"/>`,
+
+  // Folha com a nervura.
+  natureza: (c) => `
+    <path d="M28 88 C24 56 44 38 76 38 C76 70 58 90 28 88 Z"
+          fill="none" stroke="${c}" stroke-width="3.5" stroke-linejoin="round"/>
+    <path d="M28 88 L62 52 M42 74 h14 M50 65 v-12"
+          stroke="${c}" stroke-width="3" stroke-linecap="round" opacity=".6"/>`,
+
+  // Prato entre garfo e faca.
+  culinaria: (c) => `
+    <circle cx="50" cy="66" r="19" fill="none" stroke="${c}" stroke-width="3.5"/>
+    <circle cx="50" cy="66" r="10" fill="none" stroke="${c}" stroke-width="2.5" opacity=".55"/>
+    <path d="M18 44 v14 M13 44 v9 a5 5 0 0 0 10 0 v-9 M18 58 v30"
+          fill="none" stroke="${c}" stroke-width="3" stroke-linecap="round" opacity=".8"/>
+    <path d="M83 88 V44 c-7 6 -7 20 0 26"
+          fill="none" stroke="${c}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity=".8"/>`
 };
 
 /**

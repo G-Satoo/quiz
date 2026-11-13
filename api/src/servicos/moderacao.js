@@ -91,7 +91,16 @@ export async function carregarParaModeracao(id) {
 export async function analisarComIA(quiz) {
   const capa = quiz.capa_bytes ? { tipo: quiz.capa_tipo, bytes: quiz.capa_bytes } : null;
 
-  const veredito = await moderarQuiz(quiz, capa);
+  // As etiquetas mais usadas vão junto, para a IA reaproveitar em vez
+  // de inventar uma grafia nova a cada quiz.
+  const { rows: emUso } = await pool.query(
+    `SELECT e AS etiqueta
+       FROM quizzes q, unnest(q.etiquetas) AS e
+      WHERE q.situacao = 'publicado'
+      GROUP BY e ORDER BY COUNT(*) DESC, e LIMIT 60`
+  );
+
+  const veredito = await moderarQuiz({ ...quiz, etiquetasEmUso: emUso.map((l) => l.etiqueta) }, capa);
   const situacao = SITUACAO_POR_DECISAO[veredito.decisao];
 
   const { rowCount } = await pool.query(
@@ -100,10 +109,11 @@ export async function analisarComIA(quiz) {
             moderacao_motivo = $2,
             moderacao_por = 'ia',
             moderacao_em = now(),
-            -- A categoria é a que a IA viu no conteúdo.
-            categoria = $5
+            -- A categoria e as etiquetas são as que a IA viu no conteúdo.
+            categoria = $5,
+            etiquetas = $6
       WHERE id = $3 AND versao = $4`,
-    [situacao, veredito.motivo, quiz.id, quiz.versao, veredito.assunto]
+    [situacao, veredito.motivo, quiz.id, quiz.versao, veredito.assunto, veredito.etiquetas]
   );
 
   if (rowCount === 0) return { mudou: true };

@@ -42,6 +42,7 @@ import {
 import {
   lerInteiro,
   validarTitulo,
+  validarDescricao,
   validarCategoria,
   validarIcone,
   validarTema,
@@ -120,7 +121,7 @@ router.get("/", async (req, res, next) => {
       // `aberturas`. COUNT(*) FILTER faz as duas numa varredura
       // só do índice, em vez de uma subconsulta para cada.
       `SELECT q.id, q.titulo, q.descricao, q.categoria, q.criado_em,
-              q.partidas, q.icone, q.tema,
+              q.partidas, q.icone, q.tema, q.etiquetas,
               (CASE WHEN c.quiz_id IS NOT NULL
                          AND (q.situacao = 'publicado' OR q.usuario_id = $1)
                     THEN '/api/quizzes/' || q.id || '/capa?v=' || q.versao END) AS imagem_url,
@@ -184,7 +185,7 @@ router.get("/:id", async (req, res, next) => {
 
     const { rows: quizzes } = await pool.query(
       `SELECT q.id, q.titulo, q.descricao, q.categoria, q.criado_em,
-              q.partidas, q.icone, q.tema,
+              q.partidas, q.icone, q.tema, q.etiquetas,
               (CASE WHEN c.quiz_id IS NOT NULL
                          AND (q.situacao = 'publicado' OR q.usuario_id = $2)
                     THEN '/api/quizzes/' || q.id || '/capa?v=' || q.versao END) AS imagem_url,
@@ -317,6 +318,7 @@ router.post("/", exigirLogin, async (req, res, next) => {
 
   const erro =
     validarTitulo(titulo) ??
+    validarDescricao(descricao) ??
     validarCategoria(categoria) ??
     validarIcone(icone) ??
     validarTema(tema) ??
@@ -406,6 +408,7 @@ router.patch("/:id", exigirLogin, async (req, res, next) => {
 
     const erro =
       (titulo !== undefined ? validarTitulo(titulo) : null) ??
+      validarDescricao(descricao) ??
       validarCategoria(categoria) ??
       validarIcone(icone) ??
       validarTema(tema);

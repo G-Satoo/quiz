@@ -98,7 +98,8 @@ export function validarNome(nome) {
 // uma mensagem em português em vez de um erro de constraint.
 export const CATEGORIAS = [
   "geral", "anime", "games", "filmes", "musica",
-  "esportes", "historia", "ciencia", "tecnologia", "educacao"
+  "esportes", "historia", "ciencia", "tecnologia", "educacao",
+  "geografia", "natureza", "culinaria"
 ];
 
 export function validarCategoria(categoria) {
@@ -115,6 +116,38 @@ export function validarCategoria(categoria) {
  * amanhã. Basta ser curto — o pior caso é uma capa com uma letra
  * estranha, não um dado perigoso (a tela usa textContent).
  */
+export const MAX_ETIQUETAS = 4;
+
+/**
+ * As etiquetas do quiz: os assuntos a que ele pertence ("corrida",
+ * "automobilismo", "carros"). A PRIMEIRA é a principal, a que aparece
+ * na capa: o grupo pelo qual alguém procuraria o quiz ("anime", e
+ * não "ninja"). As demais descem ao detalhe e servem à busca.
+ *
+ * Quem escreve é a IA, na aprovação — mas resposta de modelo é
+ * entrada como outra qualquer, então passa por aqui: minúsculas,
+ * só letras, números, espaço e hífen, de 2 a 20 caracteres, sem
+ * repetir, no máximo quatro. O que não serve é descartado em
+ * silêncio; um quiz sem etiqueta mostra a categoria na capa.
+ */
+export function normalizarEtiquetas(lista) {
+  if (!Array.isArray(lista)) return [];
+
+  const vistas = new Set();
+
+  for (const item of lista) {
+    if (typeof item !== "string") continue;
+
+    const etiqueta = item.trim().toLowerCase().replace(/\s+/g, " ");
+    if (!/^[\p{L}\p{N}][\p{L}\p{N} -]{1,19}$/u.test(etiqueta)) continue;
+
+    vistas.add(etiqueta);
+    if (vistas.size === MAX_ETIQUETAS) break;
+  }
+
+  return [...vistas];
+}
+
 /** O tema do gerador. Opcional: quiz escrito à mão não tem. */
 export function validarTema(tema) {
   if (tema === undefined || tema === null || tema === "") return null;
@@ -127,6 +160,22 @@ export function validarIcone(icone) {
   if (icone === undefined || icone === null || icone === "") return null;
   if (typeof icone !== "string") return "Símbolo inválido";
   if ([...icone].length > 8) return "Use um símbolo só";
+  return null;
+}
+
+export const MAX_DESCRICAO = 300;
+
+/**
+ * A descrição ("Sobre o quiz"). Opcional.
+ *
+ * O campo da tela já tem maxlength — mas isso é do navegador: quem
+ * fala direto com a API manda o tamanho que quiser. O limite de
+ * verdade é este.
+ */
+export function validarDescricao(descricao) {
+  if (descricao === undefined || descricao === null || descricao === "") return null;
+  if (typeof descricao !== "string") return "Descrição inválida";
+  if (descricao.trim().length > MAX_DESCRICAO) return `A descrição passa de ${MAX_DESCRICAO} caracteres`;
   return null;
 }
 

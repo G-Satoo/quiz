@@ -50,8 +50,8 @@ try {
   await telao.waitForTimeout(600);
   await foto(telao, "perfil.png");
 
-  await telao.goto(`${BASE}/editor.html?id=${quiz.id}`);
-  await telao.locator("#botao-apresentar").waitFor();
+  await telao.goto(`${BASE}/quiz.html?id=${quiz.id}`);
+  await telao.locator("#botao-jogar").waitFor();
   await telao.waitForTimeout(600);
   await foto(telao, "preparar-partida.png");
 

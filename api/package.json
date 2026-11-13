@@ -13,7 +13,8 @@
     "test:e2e": "node --test tests/e2e/*.test.js",
     "semear:catalogo": "node scripts/semear-catalogo.js",
     "admin": "node scripts/tornar-admin.js",
-    "capturas": "node scripts/capturas.js"
+    "capturas": "node scripts/capturas.js",
+    "capas:catalogo": "node scripts/capas-catalogo.js"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",
